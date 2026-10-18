@@ -5,10 +5,20 @@ const LIMIT = 10000;
 function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('error', error); }
 function reset() { rows = []; headers = []; selected = []; workbook = null; $('settings').hidden = true; $('preview').replaceChildren(); $('summary').textContent = 'ยังไม่มีข้อมูล'; $('report').replaceChildren(); }
 function table(data, indexes) {
-  const result = document.createElement('table'), head = result.createTHead().insertRow();
-  indexes.forEach(i => { const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = headers[i]; head.append(cell); });
+  const result = document.createElement('table');
+  result.className = 'data-table ' + ($('layout').value === 'compact' ? 'compact' : 'grid');
+  result.style.setProperty('--report-font', $('fontSize').value + 'pt');
+  // Use the full report to keep preview and printed column widths consistent.
+  const weights = indexes.map(i => Math.min(75, Math.max(8, ...[headers[i], ...rows.map(row => row[i] ?? '')].map(value => Math.max(...String(value).split(/\r?\n/).map(line => Array.from(line).length))))));
+  const total = weights.reduce((sum, width) => sum + width, 0);
+  const cols = document.createElement('colgroup');
+  weights.forEach(weight => { const col = document.createElement('col'); col.style.width = (weight / total * 100) + '%'; cols.append(col); });
+  result.append(cols);
+  const numeric = indexes.map(i => rows.some(row => String(row[i] ?? '').trim()) && rows.every(row => !String(row[i] ?? '').trim() || /^-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/.test(String(row[i]).trim())));
+  const head = result.createTHead().insertRow();
+  indexes.forEach((i, position) => { const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = headers[i]; if (numeric[position]) cell.className = 'numeric'; head.append(cell); });
   const body = result.createTBody();
-  data.forEach(row => { const tr = body.insertRow(); indexes.forEach(i => { tr.insertCell().textContent = String(row[i] ?? ''); }); });
+  data.forEach(row => { const tr = body.insertRow(); indexes.forEach((i, position) => { const cell = tr.insertCell(); cell.textContent = String(row[i] ?? ''); if (numeric[position]) cell.className = 'numeric'; }); });
   return result;
 }
 function render() {
@@ -64,6 +74,7 @@ function loadSheet() {
   catch (error) { rows = []; $('preview').replaceChildren(); $('columns').replaceChildren(); $('export').disabled = true; $('summary').textContent = 'แผ่นงานนี้ไม่มีข้อมูลที่ใช้ได้'; status(error.message, true); }
 }
 $('file').addEventListener('change', () => { currentFile = $('file').files[0] || null; if (currentFile) { const base = currentFile.name.replace(/\.[^.]+$/, ''); $('filename').value = base; $('title').value = base; } readFile(); });
+for (const id of ['layout', 'fontSize']) $(id).addEventListener('change', render);
 $('encoding').addEventListener('change', readFile); $('sheet').addEventListener('change', loadSheet);
 for (const [id, value] of [['all', true], ['none', false]]) $(id).addEventListener('click', () => { selected.fill(value); $('columns').querySelectorAll('input').forEach(input => input.checked = value); render(); });
 $('export').addEventListener('click', () => {
