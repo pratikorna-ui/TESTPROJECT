@@ -1,13 +1,24 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>โปรเจกต์แปลงไฟล์เป็น PDF</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Space · เครื่องมือของฉัน</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f6fb;color:#19253d;font:16px/1.65 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 24px}h1,h2,p{margin:0 0 16px}.badge{color:#4862d9;font-weight:700}nav{display:flex;gap:12px;margin:24px 0}button,.upload{cursor:pointer;border:0;border-radius:10px;padding:12px 18px;font:inherit;background:#4d60dd;color:white}button:disabled{opacity:.45;cursor:not-allowed}.muted{color:#65718a}.card{background:white;border:1px solid #e0e6f0;border-radius:18px;padding:26px;margin-bottom:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}label{display:block;margin:12px 0 6px}input,select{font:inherit;border:1px solid #cbd4e4;border-radius:8px;padding:10px;max-width:100%;background:white}input[type=text]{width:100%}input[type=checkbox]{margin-right:8px}#columns{display:flex;flex-wrap:wrap;gap:8px 18px}#columns label{margin:4px 0}.scroll{overflow:auto;max-height:440px}table{border-collapse:collapse;width:100%;font-size:14px}th,td{border:1px solid #dce2eb;padding:9px;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#eef1fa}#status{min-height:28px;color:#4354b9}#status.error{color:#b42318}.actions{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}.secondary{background:#edf0fc;color:#394cae}#report{display:none}@media(max-width:700px){.grid{grid-template-columns:1fr}main{padding:24px 14px}.card{padding:18px}}@media print{body{background:white;color:black}main{display:none}#report{display:block}#report h1{font-size:20px}table{font-size:10px;table-layout:fixed}th,td{padding:5px}thead{display:table-header-group}tr{break-inside:avoid}th{background:#eee!important;print-color-adjust:exact}}
+</style>
+<script defer src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@e965/xlsx@0.20.3/dist/xlsx.full.min.js"></script>
+<script defer src="app.js"></script>
 </head>
-<body>
-  <h1>แปลง CSV และ Excel เป็น PDF</h1>
-  <p>เว็บไซต์แรกของฉัน 🎉</p>
-  <p>ขั้นต่อไป เราจะเพิ่มช่องนำเข้าไฟล์ที่นี่</p>
-</body>
-</html>
+<body><main>
+<span class="badge">PROJECT SPACE</span><h1>เครื่องมือเล็ก ๆ สำหรับงานของคุณ</h1><p class="muted">เลือกโปรเจกต์ แล้วเริ่มจัดการข้อมูลได้เลย</p>
+<nav aria-label="โปรเจกต์"><button type="button" aria-current="page">01 · CSV / Excel → PDF</button><button disabled>โปรเจกต์ถัดไป · เร็ว ๆ นี้</button></nav>
+<section class="card"><h2>แปลงข้อมูลเป็น PDF</h2><p class="muted">เลือกไฟล์ เลือกคอลัมน์ แล้วจัดหน้ารายงาน · ไฟล์ประมวลผลในเบราว์เซอร์ ไม่มีการอัปโหลดไปยังเซิร์ฟเวอร์</p>
+<label for="file">1. นำเข้าไฟล์ CSV, XLSX หรือ XLS (ไม่เกิน 10 MB)</label><input id="file" type="file" accept=".csv,.xlsx,.xls">
+<div id="status" role="status" aria-live="polite">ยังไม่ได้เลือกไฟล์</div>
+<div id="settings" hidden><div class="grid"><div><label for="sheet">แผ่นงาน</label><select id="sheet"></select><label for="title">หัวข้อรายงาน</label><input id="title" type="text" value="รายงานข้อมูล" maxlength="150"><label for="filename">ชื่อไฟล์ PDF</label><input id="filename" type="text" value="รายงานข้อมูล" maxlength="120"><small class="muted">ชื่อที่เสนอให้เบราว์เซอร์ อาจต้องแก้ในหน้าต่างบันทึกอีกครั้ง</small></div>
+<div><label for="orientation">แนวกระดาษ A4</label><select id="orientation"><option value="landscape">แนวนอน</option><option value="portrait">แนวตั้ง</option></select><label for="encoding">การอ่าน CSV</label><select id="encoding"><option value="utf-8">UTF-8 (ทั่วไป)</option><option value="windows-874">Thai / Windows-874 (ถ้าภาษาไทยเพี้ยน)</option></select><p class="muted">แถวแรกใช้เป็นชื่อคอลัมน์ เลือกทีละแผ่นงานสำหรับ Excel</p></div></div>
+<label>2. เลือกคอลัมน์ที่ต้องการ (เรียงตามไฟล์ต้นฉบับ)</label><div class="actions"><button class="secondary" id="all">เลือกทั้งหมด</button><button class="secondary" id="none">ล้างการเลือก</button></div><div id="columns"></div>
+<div class="actions"><button id="export">3. บันทึกเป็น PDF / พิมพ์</button></div><p class="muted">ในหน้าต่างพิมพ์ เลือก “บันทึกเป็น PDF / Save as PDF” และปิดหัวกระดาษ/ท้ายกระดาษหากไม่ต้องการ URL จากนั้นเลือกโฟลเดอร์บันทึกได้ตามเบราว์เซอร์</p></div></section>
+<section class="card"><h2>ตัวอย่างข้อมูล</h2><p id="summary" class="muted">ข้อมูลจะแสดงที่นี่หลังเลือกไฟล์</p><div id="preview" class="scroll"></div></section>
+</main><section id="report"></section><style id="pageStyle">@page{size:A4 landscape;margin:12mm}</style></body></html>
