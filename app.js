@@ -1,89 +1,88 @@
-'use strict';
+import * as pdfjsLib from './vendor/pdf.min.mjs';
+window.pdfjsLib = pdfjsLib;
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.mjs';
 const $ = id => document.getElementById(id);
-let workbook = null, rows = [], headers = [], selected = [], currentFile = null, generation = 0;
-const LIMIT = 10000;
-function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('error', error); }
-function reset() { rows = []; headers = []; selected = []; workbook = null; $('settings').hidden = true; $('preview').replaceChildren(); $('summary').textContent = 'ยังไม่มีข้อมูล'; $('report').replaceChildren(); }
-function table(data, indexes) {
-  const result = document.createElement('table');
-  result.className = 'data-table ' + ($('layout').value === 'compact' ? 'compact' : 'grid');
-  result.style.setProperty('--report-font', $('fontSize').value + 'pt');
-  // Use the full report to keep preview and printed column widths consistent.
-  const weights = indexes.map(i => Math.min(75, Math.max(8, ...[headers[i], ...rows.map(row => row[i] ?? '')].map(value => Math.max(...String(value).split(/\r?\n/).map(line => Array.from(line).length))))));
-  const total = weights.reduce((sum, width) => sum + width, 0);
-  const cols = document.createElement('colgroup');
-  weights.forEach(weight => { const col = document.createElement('col'); col.style.width = (weight / total * 100) + '%'; cols.append(col); });
-  result.append(cols);
-  const numeric = indexes.map(i => rows.some(row => String(row[i] ?? '').trim()) && rows.every(row => !String(row[i] ?? '').trim() || /^-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/.test(String(row[i]).trim())));
-  const head = result.createTHead().insertRow();
-  indexes.forEach((i, position) => { const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = headers[i]; if (numeric[position]) cell.className = 'numeric'; head.append(cell); });
-  const body = result.createTBody();
-  data.forEach(row => { const tr = body.insertRow(); indexes.forEach((i, position) => { const cell = tr.insertCell(); cell.textContent = String(row[i] ?? ''); if (numeric[position]) cell.className = 'numeric'; }); });
-  return result;
+const items = []; let busy = false, zipUrl;
+function message(text, error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
+function sync(){ $('run').disabled=busy||!items.length||items.some(i=>!i.ready); $('files').disabled=busy; document.querySelectorAll('.item input,.item textarea,.item select,.item button').forEach(el=>el.disabled=busy); }
+function invalidate(){if(zipUrl){URL.revokeObjectURL(zipUrl);zipUrl=null;}$('download').hidden=true;}
+function clean(name){return name.replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').replace(/^\.+/,'').trim()||'document';}
+function remark(item){
+ const text=item.text.value.trim(); if(!text)throw new Error('กรุณาใส่ remark');
+ const size=Number(item.size.value); if(!Number.isFinite(size)||size<6||size>36)throw new Error('ขนาดตัวอักษรต้องอยู่ระหว่าง 6–36 pt');
+ const width=item.view.width-item.x-12; if(width<30)throw new Error('ตำแหน่งชิดขอบขวาเกินไป กรุณาคลิกใหม่');
+ const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
+ ctx.font=`${size}px sans-serif`; const lines=[];
+ for(const paragraph of text.split(/\r?\n/)){
+  let line='';
+  const parts= typeof Intl.Segmenter==='function' ? Array.from(new Intl.Segmenter('th',{granularity:'grapheme'}).segment(paragraph),s=>s.segment):Array.from(paragraph);
+  for(const char of parts){if(ctx.measureText(line+char).width>width && line){lines.push(line);line=char;}else line+=char;} lines.push(line);
+ }
+ const height=(lines.length*1.6+.5)*size;
+ if(item.y+height>item.view.height-8)throw new Error('ข้อความยาวเกินพื้นที่ด้านล่าง ย้ายตำแหน่งขึ้นหรือลดขนาดตัวอักษร');
+ const actualWidth=Math.min(width,Math.max(1,...lines.map(line=>ctx.measureText(line).width))+2);
+ canvas.width=Math.ceil(actualWidth*3);canvas.height=Math.ceil(height*3);ctx.scale(3,3);ctx.font=`${size}px sans-serif`;ctx.fillStyle='#000';ctx.textBaseline='alphabetic';
+ lines.forEach((line,index)=>ctx.fillText(line,0,size*1.3+index*size*1.6));
+ return {canvas,width:actualWidth,height};
 }
-function render() {
-  const indexes = selected.flatMap((yes, i) => yes ? [i] : []);
-  $('preview').replaceChildren(...(indexes.length ? [table(rows.slice(0, 50), indexes)] : []));
-  $('summary').textContent = `${rows.length.toLocaleString()} แถว · เลือก ${indexes.length} / ${headers.length} คอลัมน์ · ตัวอย่างสูงสุด 50 แถว (PDF ใช้ทุกแถว)`;
-  $('export').disabled = !indexes.length || !rows.length;
+function preview(item){
+ invalidate(); item.overlay.replaceChildren();item.note.classList.remove('error');
+ if(!item.view)return;
+ try{
+  const r=remark(item);item.overlay.append(r.canvas);Object.assign(item.overlay.style,{left:`${item.x/item.view.width*100}%`,top:`${item.y/item.view.height*100}%`,width:`${r.width/item.view.width*100}%`,height:`${r.height/item.view.height*100}%`});
+  item.note.textContent=item.placed?'✓ เลือกตำแหน่งแล้ว — ตรวจดูว่าไม่ทับข้อมูลเดิม':'คลิกพื้นที่ว่างบน PDF เพื่อยืนยันตำแหน่ง remark';
+ }catch(e){item.note.textContent=e.message;item.note.classList.add('error');}
 }
-function loadData(data) {
-  data = data.filter(row => row.some(value => String(value ?? '').trim() !== ''));
-  if (data.length < 2) throw new Error('ต้องมีแถวชื่อคอลัมน์ และข้อมูลอย่างน้อย 1 แถว');
-  if (data.length - 1 > LIMIT) throw new Error('รองรับสูงสุด 10,000 แถวต่อแผ่นงาน กรุณาแบ่งไฟล์ก่อน');
-  const width = Math.max(...data.map(row => row.length));
-  if (width > 100) throw new Error('รองรับสูงสุด 100 คอลัมน์ กรุณาลดคอลัมน์ก่อน');
-  headers = Array.from({length: width}, (_, i) => String(data[0][i] ?? '').trim() || `คอลัมน์ ${i + 1}`);
-  rows = data.slice(1); selected = headers.map(() => true); $('columns').replaceChildren();
-  headers.forEach((name, i) => {
-    const label = document.createElement('label'), input = document.createElement('input'); input.type = 'checkbox'; input.checked = true;
-    input.addEventListener('change', () => { selected[i] = input.checked; render(); });
-    label.append(input, document.createTextNode(name)); $('columns').append(label);
-  });
-  $('settings').hidden = false; status(`อ่านไฟล์สำเร็จ: ${currentFile.name}`); render();
+async function showPage(item){
+ item.ready=false;item.view=null;item.placed=false;sync();
+ try{
+  const page=await item.pdf.getPage(Number(item.page.value));item.view=page.getViewport({scale:1});
+  item.x=item.view.width*.08;item.y=item.view.height*.4;
+  const scale=Math.min(1.5,1400/item.view.width);const view=page.getViewport({scale});item.canvas.width=Math.ceil(view.width);item.canvas.height=Math.ceil(view.height);
+  await page.render({canvasContext:item.canvas.getContext('2d'),viewport:view}).promise;
+  item.ready=true;preview(item);
+ }catch(e){item.note.textContent='แสดงหน้า PDF ไม่สำเร็จ กรุณาลบไฟล์นี้แล้วเลือกใหม่';item.note.classList.add('error');}finally{sync();}
 }
-async function readFile() {
-  const ticket = ++generation; reset();
-  if (!currentFile) { status('ยังไม่ได้เลือกไฟล์'); return; }
-  if (!/\.(csv|xlsx|xls)$/i.test(currentFile.name)) { status('กรุณาเลือกไฟล์ .csv, .xlsx หรือ .xls', true); return; }
-  if (currentFile.size > 10 * 1024 * 1024) { status('ไฟล์ใหญ่เกิน 10 MB กรุณาแบ่งไฟล์ก่อน', true); return; }
-  status('กำลังอ่านไฟล์…');
-  try {
-    const buffer = await currentFile.arrayBuffer(); if (ticket !== generation) return;
-    const csv = /\.csv$/i.test(currentFile.name);
-    $('encoding').disabled = !csv; $('sheet').disabled = csv; $('sheet').replaceChildren();
-    if (csv) {
-      if (!window.Papa) throw new Error('โหลดเครื่องมือ CSV ไม่สำเร็จ กรุณารีเฟรชและตรวจสอบอินเทอร์เน็ต');
-      const parsed = Papa.parse(new TextDecoder($('encoding').value).decode(buffer), {skipEmptyLines: 'greedy'});
-      if (parsed.errors.length) throw new Error('อ่าน CSV ไม่สำเร็จ: ' + parsed.errors[0].message);
-      $('sheet').add(new Option('CSV', 'csv')); loadData(parsed.data);
-    } else {
-      if (!window.XLSX) throw new Error('โหลดเครื่องมือ Excel ไม่สำเร็จ กรุณารีเฟรชและตรวจสอบอินเทอร์เน็ต');
-      workbook = XLSX.read(buffer, {type:'array', sheetRows: LIMIT + 2});
-      workbook.SheetNames.forEach(name => $('sheet').add(new Option(name, name)));
-      loadSheet();
-    }
-  } catch (error) { $('settings').hidden = true; status(error.message || 'อ่านไฟล์ไม่สำเร็จ', true); }
+async function add(file){
+ const item={file,ready:false,placed:false};items.push(item);
+ const box=document.createElement('section');box.className='item';box.innerHTML=`<div class="row"><h2></h2><button class="remove">ลบไฟล์</button></div><div class="editor"><div><label>หน้าที่ใส่ remark <select class="page"></select></label><label>Remark <textarea maxlength="4000" placeholder="เช่น 2C2P TH&#10;BNT from ..."></textarea></label><label>ขนาดตัวอักษร (pt) <input class="size" type="number" min="6" max="36" value="11"></label><label>ชื่อ PDF ที่ได้ <input class="name" maxlength="100"></label><p class="muted">คลิกบนหน้า PDF เพื่อวางมุมซ้ายบนของ remark พิมพ์ขึ้นบรรทัดใหม่ได้ พื้นหลัง remark โปร่งใส</p><p class="note" role="status">กำลังอ่านไฟล์…</p></div><div class="stage" aria-label="คลิกเพื่อวาง remark"><canvas></canvas><div class="overlay"></div></div></div>`;
+ item.box=box;item.page=box.querySelector('.page');item.text=box.querySelector('textarea');item.size=box.querySelector('.size');item.name=box.querySelector('.name');item.canvas=box.querySelector('.stage > canvas');item.overlay=box.querySelector('.overlay');item.note=box.querySelector('.note');
+ box.querySelector('h2').textContent=file.name;item.name.value=file.name.replace(/\.pdf$/i,'')+'_remarked.pdf';$('items').append(box);
+ box.querySelector('.remove').onclick=()=>{if(busy)return;items.splice(items.indexOf(item),1);item.pdf?.destroy();box.remove();invalidate();sync();};
+ item.text.oninput=item.size.oninput=()=>preview(item);item.name.oninput=invalidate;
+ item.page.onchange=()=>showPage(item);
+ const stage=box.querySelector('.stage');stage.onclick=event=>{if(busy||!item.ready)return;const rect=stage.getBoundingClientRect();item.x=(event.clientX-rect.left)/rect.width*item.view.width;item.y=(event.clientY-rect.top)/rect.height*item.view.height;item.placed=true;preview(item);};
+ try{
+  item.bytes=new Uint8Array(await file.arrayBuffer());
+  // Disable PDF JavaScript evaluation; no document actions are executed.
+  item.pdf=await pdfjsLib.getDocument({data:item.bytes.slice(),isEvalSupported:false,password:''}).promise;
+  for(let n=1;n<=item.pdf.numPages;n++)item.page.add(new Option(`${n} / ${item.pdf.numPages}`,n));
+  await showPage(item);
+ }catch(e){item.note.textContent='เปิด PDF ไม่ได้: ไฟล์อาจเสียหายหรือมีรหัสผ่าน กรุณาลบออกและเลือกไฟล์อื่น';item.note.classList.add('error');}sync();
 }
-function loadSheet() {
-  try {
-    const sheet = workbook.Sheets[$('sheet').value];
-    if (sheet['!fullref'] && XLSX.utils.decode_range(sheet['!fullref']).e.r > LIMIT) throw new Error('รองรับสูงสุด 10,000 แถวต่อแผ่นงาน กรุณาแบ่งไฟล์ก่อน');
-    loadData(XLSX.utils.sheet_to_json(sheet, {header:1, defval:'', raw:false}));
+$('files').onchange=async()=>{
+ const files=Array.from($('files').files);$('files').value='';
+ if(items.length+files.length>10){message('รองรับสูงสุด 10 ไฟล์ กรุณาลดจำนวนไฟล์',true);return;}
+ if(files.some(f=>!f.name.toLowerCase().endsWith('.pdf')||f.size>20*1024*1024)){message('เลือกเฉพาะ PDF ขนาดไม่เกิน 20 MB ต่อไฟล์',true);return;}
+ if([...items.map(i=>i.file),...files].reduce((n,f)=>n+f.size,0)>80*1024*1024){message('ขนาดไฟล์รวมต้องไม่เกิน 80 MB',true);return;}
+ busy=true;invalidate();sync();for(const file of files)await add(file);busy=false;sync();message(`เลือกแล้ว ${items.length} / 10 ไฟล์ — ใส่ remark และคลิกตำแหน่งให้ครบก่อน Run`);
+};
+$('run').onclick=async()=>{
+ busy=true;sync();invalidate();
+ try{
+  const prepared=items.map(item=>{if(!item.placed)throw new Error(`${item.file.name}: กรุณาคลิกเลือกพื้นที่ว่างก่อน`);try{return {item,image:remark(item)};}catch(e){throw new Error(`${item.file.name}: ${e.message}`);}});
+  const zip=new JSZip();const used=new Set();
+  for(let n=0;n<prepared.length;n++){
+   const {item,image}=prepared[n];message(`กำลังใส่ remark ${n+1} / ${items.length}: ${item.file.name}`);
+   const doc=await PDFLib.PDFDocument.load(item.bytes);
+   if(doc.getForm().getFields().some(field=>field instanceof PDFLib.PDFSignature))throw new Error(`${item.file.name}: มีช่องลายเซ็นดิจิทัล ไม่แก้ไขไฟล์นี้`);
+   const page=doc.getPage(Number(item.page.value)-1),png=await doc.embedPng(image.canvas.toDataURL('image/png'));
+   const [x,y]=item.view.convertToPdfPoint(item.x,item.y+image.height);
+   page.drawImage(png,{x,y,width:image.width,height:image.height,rotate:PDFLib.degrees(page.getRotation().angle)});
+   let base=clean(item.name.value.replace(/\.pdf$/i,'')),name=base+'.pdf',suffix=2;while(used.has(name.toLowerCase()))name=base+'_'+(suffix++)+'.pdf';used.add(name.toLowerCase());
+   zip.file(name,await doc.save());
   }
-  catch (error) { rows = []; $('preview').replaceChildren(); $('columns').replaceChildren(); $('export').disabled = true; $('summary').textContent = 'แผ่นงานนี้ไม่มีข้อมูลที่ใช้ได้'; status(error.message, true); }
-}
-$('file').addEventListener('change', () => { currentFile = $('file').files[0] || null; if (currentFile) { const base = currentFile.name.replace(/\.[^.]+$/, ''); $('filename').value = base; $('title').value = base; } readFile(); });
-for (const id of ['layout', 'fontSize']) $(id).addEventListener('change', render);
-$('encoding').addEventListener('change', readFile); $('sheet').addEventListener('change', loadSheet);
-for (const [id, value] of [['all', true], ['none', false]]) $(id).addEventListener('click', () => { selected.fill(value); $('columns').querySelectorAll('input').forEach(input => input.checked = value); render(); });
-$('export').addEventListener('click', () => {
-  const indexes = selected.flatMap((yes, i) => yes ? [i] : []); if (!indexes.length || !rows.length) return;
-  const heading = document.createElement('h1'); heading.textContent = $('title').value.trim() || 'รายงานข้อมูล';
-  $('report').replaceChildren(heading, table(rows, indexes));
-  $('pageStyle').textContent = `@page{size:A4 ${$('orientation').value === 'portrait' ? 'portrait' : 'landscape'};margin:12mm}`;
-  const original = document.title;
-  document.title = ($('filename').value.trim().replace(/[\\/:*?"<>|]/g, '_').replace(/\.pdf$/i, '') || 'report');
-  window.addEventListener('afterprint', () => { document.title = original; }, {once:true});
-  window.print();
-});
+  message('กำลังสร้าง ZIP…');const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});zipUrl=URL.createObjectURL(blob);
+  const a=$('download');a.href=zipUrl;a.download=clean($('zipname').value.replace(/\.zip$/i,''))+'.zip';a.hidden=false;a.click();message(`เสร็จแล้ว! ZIP มี PDF ที่ใส่ remark ${items.length} ไฟล์`);
+ }catch(e){message('ยังไม่สร้าง ZIP: '+e.message,true);}finally{busy=false;sync();}
+};
