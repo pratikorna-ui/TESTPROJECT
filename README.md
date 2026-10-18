@@ -30,3 +30,16 @@ Vendored files and license notices in `vendor/`: PDF.js 5.4.624 legacy browser b
 ## Validation
 
 Browser integration checks performed with Chromium: 10-file export, valid ZIP containing readable PDFs, Thai/English remarks, 0/90/180/270-degree pages, original page count and text preservation, placement validation, duplicate filenames, batch limit, and download invalidation.
+
+
+## Project 02 — CSV to Excel
+
+Open `csv-excel.html` from the navigation. Select up to 50 CSV files (10 MB each / 80 MB total), inspect each preview and download one ZIP containing one XLSX per CSV. No server uploads or build step.
+
+Encoding defaults to strict UTF-8, UTF-16 BOM detection, then a tentative Thai Windows-874 fallback. Users can override encoding and delimiters per file. Optional explicit repair reverses Windows-1252 or Windows-874 mojibake into UTF-8; users must inspect the preview. Already lost characters cannot be reconstructed.
+
+All cells are stored as strings to preserve leading zeros, large IDs, date spelling, whitespace and formula-like text. Numbers are therefore not automatically numeric Excel cells. CSV has no original Excel formatting to restore. Blank records and quoted embedded newlines are retained; the final CSV record terminator is not treated as an extra blank record. Workbook columns get readable widths.
+
+Limits: 500,000 cells per file, 1,000,000 cells per conversion batch, plus Excel's row/column and 32,767-character-per-cell limits. Invalid decoding, malformed CSV, empty files or exceeded limits block export with an error. Duplicate filenames receive suffixes. Library licenses: Papa Parse 5.4.1 (MIT), SheetJS-compatible @e965/xlsx 0.20.3 (Apache-2.0), JSZip (MIT).
+
+Chromium integration validation covered multi-file ZIP and XLSX round-trip, Windows-874 Thai, UTF-8 BOM, UTF-16 tab-delimited data, explicit mojibake repair, semicolon/comma/tab delimiters, leading zeros and long IDs, formula-like strings, quoted commas/newlines, blank rows, empty-file/encoding errors and invalidation of old downloads.
