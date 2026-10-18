@@ -1,10 +1,12 @@
-import * as pdfjsLib from './vendor/pdf.min.mjs';
-window.pdfjsLib = pdfjsLib;
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.mjs';
+let pdfjsLib, enginePromise;
+async function engine(){
+ if(!enginePromise)enginePromise=import('./vendor/pdf.min.js').then(lib=>{pdfjsLib=lib;window.pdfjsLib=lib;lib.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.js';return lib;}).catch(error=>{enginePromise=null;throw new Error('โหลดเครื่องมือ PDF ไม่สำเร็จ กรุณารีเฟรชหน้าเว็บ หรือใช้ Chrome / Edge รุ่นล่าสุด');});
+ return enginePromise;
+}
 const $ = id => document.getElementById(id);
 const items = []; let busy = false, zipUrl;
 function message(text, error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
-function sync(){ $('run').disabled=busy||!items.length||items.some(i=>!i.ready); $('files').disabled=busy; document.querySelectorAll('.item input,.item textarea,.item select,.item button').forEach(el=>el.disabled=busy); }
+function sync(){ const active=items.filter(i=>i.file);$('run').disabled=busy||!active.length||active.some(i=>!i.ready);document.querySelectorAll('.item input,.item textarea,.item select,.item button').forEach(el=>el.disabled=busy); }
 function invalidate(){if(zipUrl){URL.revokeObjectURL(zipUrl);zipUrl=null;}$('download').hidden=true;}
 function clean(name){return name.replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').replace(/^\.+/,'').trim()||'document';}
 function remark(item){
@@ -43,37 +45,41 @@ async function showPage(item){
   item.ready=true;preview(item);
  }catch(e){item.note.textContent='แสดงหน้า PDF ไม่สำเร็จ กรุณาลบไฟล์นี้แล้วเลือกใหม่';item.note.classList.add('error');}finally{sync();}
 }
-async function add(file){
- const item={file,ready:false,placed:false};items.push(item);
- const box=document.createElement('section');box.className='item';box.innerHTML=`<div class="row"><h2></h2><button class="remove">ลบไฟล์</button></div><div class="editor"><div><label>หน้าที่ใส่ remark <select class="page"></select></label><label>Remark <textarea maxlength="4000" placeholder="เช่น 2C2P TH&#10;BNT from ..."></textarea></label><label>ขนาดตัวอักษร (pt) <input class="size" type="number" min="6" max="36" value="11"></label><label>ชื่อ PDF ที่ได้ <input class="name" maxlength="100"></label><p class="muted">คลิกบนหน้า PDF เพื่อวางมุมซ้ายบนของ remark พิมพ์ขึ้นบรรทัดใหม่ได้ พื้นหลัง remark โปร่งใส</p><p class="note" role="status">กำลังอ่านไฟล์…</p></div><div class="stage" aria-label="คลิกเพื่อวาง remark"><canvas></canvas><div class="overlay"></div></div></div>`;
- item.box=box;item.page=box.querySelector('.page');item.text=box.querySelector('textarea');item.size=box.querySelector('.size');item.name=box.querySelector('.name');item.canvas=box.querySelector('.stage > canvas');item.overlay=box.querySelector('.overlay');item.note=box.querySelector('.note');
- box.querySelector('h2').textContent=file.name;item.name.value=file.name.replace(/\.pdf$/i,'')+'_remarked.pdf';$('items').append(box);
- box.querySelector('.remove').onclick=()=>{if(busy)return;items.splice(items.indexOf(item),1);item.pdf?.destroy();box.remove();invalidate();sync();};
- item.text.oninput=item.size.oninput=()=>preview(item);item.name.oninput=invalidate;
- item.page.onchange=()=>showPage(item);
- const stage=box.querySelector('.stage');stage.onclick=event=>{if(busy||!item.ready)return;const rect=stage.getBoundingClientRect();item.x=(event.clientX-rect.left)/rect.width*item.view.width;item.y=(event.clientY-rect.top)/rect.height*item.view.height;item.placed=true;preview(item);};
- try{
-  item.bytes=new Uint8Array(await file.arrayBuffer());
-  // Disable PDF JavaScript evaluation; no document actions are executed.
-  item.pdf=await pdfjsLib.getDocument({data:item.bytes.slice(),isEvalSupported:false,password:''}).promise;
-  for(let n=1;n<=item.pdf.numPages;n++)item.page.add(new Option(`${n} / ${item.pdf.numPages}`,n));
-  await showPage(item);
- }catch(e){item.note.textContent='เปิด PDF ไม่ได้: ไฟล์อาจเสียหายหรือมีรหัสผ่าน กรุณาลบออกและเลือกไฟล์อื่น';item.note.classList.add('error');}sync();
+function clear(item,keepInput=false){
+ item.pdf?.destroy();item.pdf=null;item.file=null;item.bytes=null;item.ready=false;item.view=null;item.placed=false;if(!keepInput)item.fileInput.value='';item.page.replaceChildren();item.overlay.replaceChildren();item.details.hidden=true;item.note.classList.remove('error');item.note.textContent='ยังไม่ได้เลือกไฟล์';invalidate();sync();
 }
-$('files').onchange=async()=>{
- const files=Array.from($('files').files);$('files').value='';
- if(items.length+files.length>10){message('รองรับสูงสุด 10 ไฟล์ กรุณาลดจำนวนไฟล์',true);return;}
- if(files.some(f=>!f.name.toLowerCase().endsWith('.pdf')||f.size>20*1024*1024)){message('เลือกเฉพาะ PDF ขนาดไม่เกิน 20 MB ต่อไฟล์',true);return;}
- if([...items.map(i=>i.file),...files].reduce((n,f)=>n+f.size,0)>80*1024*1024){message('ขนาดไฟล์รวมต้องไม่เกิน 80 MB',true);return;}
- busy=true;invalidate();sync();for(const file of files)await add(file);busy=false;sync();message(`เลือกแล้ว ${items.length} / 10 ไฟล์ — ใส่ remark และคลิกตำแหน่งให้ครบก่อน Run`);
-};
+for(const box of document.querySelectorAll('.item')){
+ const item={box,file:null,ready:false,placed:false};items.push(item);
+ item.fileInput=box.querySelector('.file');item.page=box.querySelector('.page');item.text=box.querySelector('textarea');item.size=box.querySelector('.size');item.name=box.querySelector('.name');item.canvas=box.querySelector('.stage > canvas');item.overlay=box.querySelector('.overlay');item.note=box.querySelector('.note');item.details=box.querySelector('details');
+ box.querySelector('.remove').onclick=()=>{if(busy)return;clear(item);item.text.value='';item.name.value='';};
+ item.text.oninput=item.size.oninput=()=>preview(item);item.name.oninput=invalidate;
+ item.page.onchange=async()=>{busy=true;sync();try{await showPage(item);}finally{busy=false;sync();}};
+ const stage=box.querySelector('.stage');stage.onclick=event=>{if(busy||!item.ready)return;const rect=stage.getBoundingClientRect();item.x=(event.clientX-rect.left)/rect.width*item.view.width;item.y=(event.clientY-rect.top)/rect.height*item.view.height;item.placed=true;preview(item);};
+ item.fileInput.onchange=async()=>{
+  const file=item.fileInput.files[0];if(!file)return;
+  clear(item,true);item.file=file;invalidate();sync();
+  if(!file.name.toLowerCase().endsWith('.pdf')||file.size>20*1024*1024){item.note.textContent='เลือกเฉพาะ PDF ขนาดไม่เกิน 20 MB';item.note.classList.add('error');return;}
+  if(items.reduce((sum,i)=>sum+(i.file?.size||0),0)>80*1024*1024){item.note.textContent='ขนาดไฟล์รวมเกิน 80 MB กรุณาล้างช่องนี้';item.note.classList.add('error');return;}
+  busy=true;sync();item.note.textContent='กำลังเปิด '+file.name+'…';message('กำลังโหลดตัวอย่าง PDF…');
+  try{
+   await engine();item.bytes=new Uint8Array(await file.arrayBuffer());
+   item.pdf=await pdfjsLib.getDocument({data:item.bytes.slice(),isEvalSupported:false,password:''}).promise;
+   for(let n=1;n<=item.pdf.numPages;n++)item.page.add(new Option(`${n} / ${item.pdf.numPages}`,n));
+   item.name.value=file.name.replace(/\.pdf$/i,'')+'_remarked.pdf';item.details.hidden=false;item.details.open=true;
+   await showPage(item);
+   message(`เลือกแล้ว ${items.filter(i=>i.file).length} / 10 ไฟล์ — ใส่ remark และคลิกพื้นที่ว่างในแต่ละ PDF`);
+  }catch(e){item.note.textContent='เปิด PDF ไม่สำเร็จ: '+(e.name==='PasswordException'?'ไฟล์มีรหัสผ่าน':e.message);item.note.classList.add('error');message('โหลดไฟล์ไม่สำเร็จ ดูข้อความในช่องที่เลือก แล้วลองใหม่ได้',true);}
+  finally{busy=false;sync();}
+ };
+}
+sync();
 $('run').onclick=async()=>{
  busy=true;sync();invalidate();
  try{
-  const prepared=items.map(item=>{if(!item.placed)throw new Error(`${item.file.name}: กรุณาคลิกเลือกพื้นที่ว่างก่อน`);try{return {item,image:remark(item)};}catch(e){throw new Error(`${item.file.name}: ${e.message}`);}});
+  const prepared=items.filter(item=>item.file).map(item=>{if(!item.placed)throw new Error(`${item.file.name}: กรุณาคลิกเลือกพื้นที่ว่างก่อน`);try{return {item,image:remark(item)};}catch(e){throw new Error(`${item.file.name}: ${e.message}`);}});
   const zip=new JSZip();const used=new Set();
   for(let n=0;n<prepared.length;n++){
-   const {item,image}=prepared[n];message(`กำลังใส่ remark ${n+1} / ${items.length}: ${item.file.name}`);
+   const {item,image}=prepared[n];message(`กำลังใส่ remark ${n+1} / ${prepared.length}: ${item.file.name}`);
    const doc=await PDFLib.PDFDocument.load(item.bytes);
    if(doc.getForm().getFields().some(field=>field instanceof PDFLib.PDFSignature))throw new Error(`${item.file.name}: มีช่องลายเซ็นดิจิทัล ไม่แก้ไขไฟล์นี้`);
    const page=doc.getPage(Number(item.page.value)-1),png=await doc.embedPng(image.canvas.toDataURL('image/png'));
@@ -83,6 +89,8 @@ $('run').onclick=async()=>{
    zip.file(name,await doc.save());
   }
   message('กำลังสร้าง ZIP…');const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});zipUrl=URL.createObjectURL(blob);
-  const a=$('download');a.href=zipUrl;a.download=clean($('zipname').value.replace(/\.zip$/i,''))+'.zip';a.hidden=false;a.click();message(`เสร็จแล้ว! ZIP มี PDF ที่ใส่ remark ${items.length} ไฟล์`);
+  const a=$('download');a.href=zipUrl;a.download=clean($('zipname').value.replace(/\.zip$/i,''))+'.zip';a.hidden=false;a.click();message(`เสร็จแล้ว! ZIP มี PDF ที่ใส่ remark ${prepared.length} ไฟล์`);
  }catch(e){message('ยังไม่สร้าง ZIP: '+e.message,true);}finally{busy=false;sync();}
 };
+
+window.remarkAppReady=true;

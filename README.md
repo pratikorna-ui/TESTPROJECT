@@ -1,6 +1,6 @@
 # Project Space — PDF Remark
 
-Static browser application for GitHub Pages. Select up to 10 PDFs, enter a separate remark and output filename for each, choose a page, click a blank location, then Run to download a ZIP. The browser processes documents locally; no upload server is used.
+Static browser application for GitHub Pages. Ten independent PDF inputs and ten remark fields are visible immediately. Fill any subset of slots, enter a separate remark and output filename for each, choose a page, click a blank location, then Run to download a ZIP. The browser processes documents locally; no upload server is used.
 
 ## Development
 
@@ -20,11 +20,12 @@ Serve the repository root over HTTP (ES modules do not work reliably when openin
 - Long remarks wrap within the remaining page width. Out-of-page remarks block export.
 - Duplicate output filenames receive numeric suffixes. The original files are never overwritten.
 - Password-protected PDFs and PDFs with digital-signature fields are unsupported. Any batch failure prevents ZIP download.
+- PDF rendering loads on demand, and dependency failures show an actionable message without hiding the form.
 - Edit a remark or placement after export to invalidate the previous download.
 
 ## Dependencies
 
-Vendored files and license notices in `vendor/`: PDF.js 5.4.624 (Apache-2.0), pdf-lib 1.17.1 (MIT), JSZip 3.10.1 (MIT / GPL-3.0 dual license; used under MIT). Files downloaded from the versioned jsDelivr npm distribution over verified HTTPS.
+Vendored files and license notices in `vendor/`: PDF.js 5.4.624 legacy browser build (Apache-2.0), pdf-lib 1.17.1 (MIT), JSZip 3.10.1 (MIT / GPL-3.0 dual license; used under MIT). Files downloaded from the versioned jsDelivr npm distribution over verified HTTPS.
 
 ## Validation
 
