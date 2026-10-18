@@ -1,5 +1,5 @@
 'use strict';
-importScripts('vendor/xlsx.full.min.js','vendor/papaparse.min.js','vendor/jszip.min.js','vendor/fflate.min.js','vendor/sax.js','acq-xlsx-reader.js');
+importScripts('vendor/xlsx.full.min.js','vendor/papaparse.min.js','vendor/jszip.min.js','vendor/fflate.min.js','vendor/sax.js','acq-xlsx-reader.js?v=xml-ns-2');
 let file, encoding='auto', selectedName, headerEnd=1, book, sheet, dense, csvRows, bounds, full=false, checked, compact, detectedEncoding;
 const pause=()=>new Promise(r=>setTimeout(r,0));
 function progress(text,done,total){postMessage({type:'progress',text,done,total});}

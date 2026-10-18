@@ -80,3 +80,5 @@ Validation: a real generated XLSX containing **400,000 data rows × 31 columns**
 Additional licenses in `vendor/`: fflate 0.8.2 (MIT), sax 1.4.1 (ISC). No build step or backend service is required.
 
 CSV stream-boundary validation used 7-byte input chunks to force splits inside Thai UTF-8 characters, quoted cells and CRLF separators. All 120 rows, quoted commas and embedded newlines round-tripped correctly.
+
+XML namespace regression: SAX open-tag objects belong to the parser's internal stack and must not be renamed. Reader callbacks now derive local names without mutating those objects, and workbook relationship IDs accept namespace aliases. A valid prefixed XLSX previously reproduced a closing-tag error; metadata, preview, full read and browser ZIP export now pass with Thai, leading-zero IDs and decimal formats intact. Parsing stays strict, with failing ZIP-entry paths included in errors. Run the self-contained regression suite with `node tests/acq-xml.cjs` (Node 20+).

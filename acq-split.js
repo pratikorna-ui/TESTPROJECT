@@ -18,7 +18,7 @@ function invalidate(){results=null;byId('result').replaceChildren();byId('export
 function lock(value){pending=value;document.querySelectorAll('input,select,textarea,button').forEach(e=>e.disabled=value);byId('cancelWork').disabled=!value;byId('cancelBottom').disabled=!value;byId('masterSheet').disabled=value||!loaded;byId('check').disabled=value||!loaded;byId('exportAcq').disabled=value||!results;byId('workProgress').hidden=!value;if(value)byId('workProgress').removeAttribute('value');}
 function stopWorker(reason){if(worker)worker.terminate();worker=null;loaded=false;const request=current;current=null;if(request)request.reject(new Error(reason));lock(false);}
 function runWorker(action,extra={}){
- if(!worker){worker=new Worker('acq-worker.js?v=large-1');const instance=worker;worker.onmessage=({data})=>{if(worker!==instance)return;
+ if(!worker){worker=new Worker('acq-worker.js?v=xml-ns-2');const instance=worker;worker.onmessage=({data})=>{if(worker!==instance)return;
   if(data.type==='progress'){notify(data.text);if(data.total){byId('workProgress').max=data.total;byId('workProgress').value=data.done;}else byId('workProgress').removeAttribute('value');return;}
   if(!current||data.id!==current.id)return;const request=current;current=null;if(data.type==='error')request.reject(new Error(data.error));else request.resolve(data.result);
  };worker.onerror=()=>{stopWorker('เครื่องมือประมวลผลหยุดทำงาน อาจมีหน่วยความจำไม่พอ กดอ่านไฟล์ใหม่เพื่อลองอีกครั้ง');notify('เครื่องมือประมวลผลหยุดทำงาน กดอ่านไฟล์ใหม่เพื่อลองอีกครั้ง',true);};}
