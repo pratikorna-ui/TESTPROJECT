@@ -16,8 +16,8 @@ Serve the repository root over HTTP (ES modules do not work reliably when openin
 
 - 10 PDFs, 20 MB each, 80 MB total. One selected page per file receives a remark; other pages remain.
 - A click explicitly confirms placement. Users must check the preview for overlap; the app does not detect blank space.
-- Remarks are transparent, high-resolution PNG overlays to support Thai text shaping using the browser's fonts. Remark text itself is not searchable/selectable; original PDF content is preserved.
-- Long remarks wrap within the remaining page width. Out-of-page remarks block export.
+- Default remarks are real PDF text in standard Helvetica, searchable/selectable for English and numbers. Existing document pages/content remain. The optional legacy image mode uses transparent PNG overlays and supports Thai via browser fonts; image remarks are not searchable. Unsupported characters in text mode produce an explicit error instead of silently rasterizing.
+- Remarks wrap within remaining page width. Text mode wraps at word boundaries; a single oversized token/amount blocks export so it is not split into unsearchable fragments. Out-of-page remarks block export.
 - Duplicate output filenames receive numeric suffixes. The original files are never overwritten.
 - Password-protected PDFs and PDFs with digital-signature fields are unsupported. Any batch failure prevents ZIP download.
 - PDF rendering loads on demand, and dependency failures show an actionable message without hiding the form.
@@ -84,3 +84,6 @@ CSV stream-boundary validation used 7-byte input chunks to force splits inside T
 XML namespace regression: SAX open-tag objects belong to the parser's internal stack and must not be renamed. Reader callbacks now derive local names without mutating those objects, and workbook relationship IDs accept namespace aliases. A valid prefixed XLSX previously reproduced a closing-tag error; metadata, preview, full read and browser ZIP export now pass with Thai, leading-zero IDs and decimal formats intact. Parsing stays strict, with failing ZIP-entry paths included in errors. Run the self-contained regression suite with `node tests/acq-xml.cjs` (Node 20+).
 
 Project 02 numeric-column regression: `node tests/csv-numbers.cjs` checks amounts, decimal formats, negatives, headers, ID preservation and unsafe-value fallback. A browser CSV→ZIP→XLSX check also verified G–I cell types and retained text.
+
+
+Project 01 searchable remarks: default export uses `drawText` with Helvetica, preserving original PDF content and page rotations. Preview uses the same PDF font widths for wrapping and positioning. A global mode selector retains the prior image workflow for Thai or fallback use. Browser validation exported 10 PDFs over all four page rotations and verified English/amount extraction, original text/page counts, no new image objects in text mode, explicit unsupported-character errors, and legacy image export. Git baseline before this change: `befc870`; revert the searchable-remark commit to roll back only this feature while preserving later work.

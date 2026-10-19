@@ -1,12 +1,12 @@
-let pdfjsLib, enginePromise;
+let pdfjsLib, enginePromise, remarkFont;
 async function engine(){
- if(!enginePromise)enginePromise=import('./vendor/pdf.min.js').then(lib=>{pdfjsLib=lib;window.pdfjsLib=lib;lib.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.js';return lib;}).catch(error=>{enginePromise=null;throw new Error('โหลดเครื่องมือ PDF ไม่สำเร็จ กรุณารีเฟรชหน้าเว็บ หรือใช้ Chrome / Edge รุ่นล่าสุด');});
+ if(!enginePromise)enginePromise=import('./vendor/pdf.min.js').then(async lib=>{pdfjsLib=lib;window.pdfjsLib=lib;lib.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.js';const sample=await PDFLib.PDFDocument.create();remarkFont=await sample.embedFont(PDFLib.StandardFonts.Helvetica);return lib;}).catch(error=>{enginePromise=null;throw new Error('โหลดเครื่องมือ PDF ไม่สำเร็จ กรุณารีเฟรชหน้าเว็บ หรือใช้ Chrome / Edge รุ่นล่าสุด');});
  return enginePromise;
 }
 const $ = id => document.getElementById(id);
 const items = []; let busy = false, zipUrl;
 function message(text, error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
-function sync(){ const active=items.filter(i=>i.file);$('run').disabled=busy||!active.length||active.some(i=>!i.ready);document.querySelectorAll('.item input,.item textarea,.item select,.item button').forEach(el=>el.disabled=busy); }
+function sync(){ const active=items.filter(i=>i.file);$('run').disabled=busy||!active.length||active.some(i=>!i.ready);document.querySelectorAll('.item input,.item textarea,.item select,.item button,#remarkMode').forEach(el=>el.disabled=busy); }
 function invalidate(){if(zipUrl){URL.revokeObjectURL(zipUrl);zipUrl=null;}$('download').hidden=true;}
 function clean(name){return name.replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').replace(/^\.+/,'').trim()||'document';}
 function remark(item){
@@ -14,18 +14,29 @@ function remark(item){
  const size=Number(item.size.value); if(!Number.isFinite(size)||size<6||size>36)throw new Error('ขนาดตัวอักษรต้องอยู่ระหว่าง 6–36 pt');
  const width=item.view.width-item.x-12; if(width<30)throw new Error('ตำแหน่งชิดขอบขวาเกินไป กรุณาคลิกใหม่');
  const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
- ctx.font=`${size}px sans-serif`; const lines=[];
+ ctx.font=`${size}px Arial,sans-serif`; const lines=[];
+ const searchable=$('remarkMode').value==='text';
+ const measure=line=>{if(!searchable)return ctx.measureText(line).width;try{return remarkFont.widthOfTextAtSize(line,size);}catch{throw new Error('มีอักขระที่ฟอนต์ข้อความไม่รองรับ เช่น ภาษาไทยหรือ emoji กรุณาเลือกโหมดภาพแบบเดิม');}};
  for(const paragraph of text.split(/\r?\n/)){
   let line='';
-  const parts= typeof Intl.Segmenter==='function' ? Array.from(new Intl.Segmenter('th',{granularity:'grapheme'}).segment(paragraph),s=>s.segment):Array.from(paragraph);
-  for(const char of parts){if(ctx.measureText(line+char).width>width && line){lines.push(line);line=char;}else line+=char;} lines.push(line);
+  // Prefer wrapping between words so search terms and amounts remain intact.
+  const parts=searchable?(paragraph.replace(/\t/g,'    ').match(/\S+|\s+/g)||[]):(typeof Intl.Segmenter==='function'?Array.from(new Intl.Segmenter('th',{granularity:'grapheme'}).segment(paragraph),s=>s.segment):Array.from(paragraph));
+  for(const part of parts){
+   if(measure(line+part)<=width){line+=part;continue;}
+   if(line){lines.push(line.trimEnd());line='';}
+   if(measure(part)<=width){line=part.trimStart();continue;}
+   if(searchable)throw new Error('คำหรือยอดยาวเกินพื้นที่ กรุณาลดขนาดตัวอักษรหรือย้ายตำแหน่งไปทางซ้าย');
+   for(const char of part){if(measure(line+char)>width&&line){lines.push(line);line='';}line+=char;}
+  }
+  lines.push(line);
+
  }
  const height=(lines.length*1.6+.5)*size;
  if(item.y+height>item.view.height-8)throw new Error('ข้อความยาวเกินพื้นที่ด้านล่าง ย้ายตำแหน่งขึ้นหรือลดขนาดตัวอักษร');
- const actualWidth=Math.min(width,Math.max(1,...lines.map(line=>ctx.measureText(line).width))+2);
- canvas.width=Math.ceil(actualWidth*3);canvas.height=Math.ceil(height*3);ctx.scale(3,3);ctx.font=`${size}px sans-serif`;ctx.fillStyle='#000';ctx.textBaseline='alphabetic';
+ const actualWidth=Math.min(width,Math.max(1,...lines.map(measure))+2);
+ canvas.width=Math.ceil(actualWidth*3);canvas.height=Math.ceil(height*3);ctx.scale(3,3);ctx.font=`${size}px Arial,sans-serif`;ctx.fillStyle='#000';ctx.textBaseline='alphabetic';
  lines.forEach((line,index)=>ctx.fillText(line,0,size*1.3+index*size*1.6));
- return {canvas,width:actualWidth,height};
+ return {canvas,width:actualWidth,height,lines,size,searchable};
 }
 function preview(item){
  invalidate(); item.overlay.replaceChildren();item.note.classList.remove('error');
@@ -82,9 +93,15 @@ $('run').onclick=async()=>{
    const {item,image}=prepared[n];message(`กำลังใส่ remark ${n+1} / ${prepared.length}: ${item.file.name}`);
    const doc=await PDFLib.PDFDocument.load(item.bytes);
    if(doc.getForm().getFields().some(field=>field instanceof PDFLib.PDFSignature))throw new Error(`${item.file.name}: มีช่องลายเซ็นดิจิทัล ไม่แก้ไขไฟล์นี้`);
-   const page=doc.getPage(Number(item.page.value)-1),png=await doc.embedPng(image.canvas.toDataURL('image/png'));
-   const [x,y]=item.view.convertToPdfPoint(item.x,item.y+image.height);
-   page.drawImage(png,{x,y,width:image.width,height:image.height,rotate:PDFLib.degrees(page.getRotation().angle)});
+   const page=doc.getPage(Number(item.page.value)-1),rotate=PDFLib.degrees(page.getRotation().angle);
+   if(image.searchable){
+    const font=await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+    image.lines.forEach((line,index)=>{if(!line)return;const [x,y]=item.view.convertToPdfPoint(item.x,item.y+image.size*1.3+index*image.size*1.6);page.drawText(line,{x,y,size:image.size,font,rotate,color:PDFLib.rgb(0,0,0)});});
+   }else{
+    const png=await doc.embedPng(image.canvas.toDataURL('image/png'));
+    const [x,y]=item.view.convertToPdfPoint(item.x,item.y+image.height);
+    page.drawImage(png,{x,y,width:image.width,height:image.height,rotate});
+   }
    let base=clean(item.name.value.replace(/\.pdf$/i,'')),name=base+'.pdf',suffix=2;while(used.has(name.toLowerCase()))name=base+'_'+(suffix++)+'.pdf';used.add(name.toLowerCase());
    zip.file(name,await doc.save());
   }
@@ -94,3 +111,5 @@ $('run').onclick=async()=>{
 };
 
 window.remarkAppReady=true;
+
+$('remarkMode').onchange=()=>{invalidate();for(const item of items)if(item.view)preview(item);};
