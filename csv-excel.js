@@ -61,17 +61,22 @@ el('convert').onclick=async()=>{
  try{
   if(!entries.length||entries.some(e=>!e.rows))throw new Error('กรุณาแก้ไฟล์ที่อ่านไม่สำเร็จก่อน');
   if(entries.reduce((n,e)=>n+e.cells,0)>1000000)throw new Error('รวมเกิน 1,000,000 เซลล์ กรุณาแบ่งแปลงเป็นหลายรอบ');
-  const zip=new JSZip(),used=new Set();
+  const zip=new JSZip(),used=new Set();let keptText=0;
   for(let i=0;i<entries.length;i++){
    const entry=entries[i];statusCSV(`กำลังแปลง ${i+1} / ${entries.length}: ${entry.file.name}`);await new Promise(resolve=>setTimeout(resolve,0));
    const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(entry.rows);
-   // All CSV values stay strings, including =formulas, dates and leading zeros.
+   // Row 1 is the header; only physical columns G, H, I become numbers.
+   for(let r=1;r<entry.rows.length;r++)for(let c=6;c<=8;c++){
+    const value=entry.rows[r][c];if(value===undefined||!String(value).trim())continue;
+    const numeric=csvNumberCell(value);
+    if(numeric)sheet[XLSX.utils.encode_cell({r,c})]=numeric;else keptText++;
+   }
    sheet['!cols']=Array.from({length:Math.max(...entry.rows.slice(0,100).map(r=>r.length))},(_,c)=>({wch:Math.min(60,Math.max(10,...entry.rows.slice(0,100).map(row=>String(row[c]??'').length+2)))}));
    XLSX.utils.book_append_sheet(book,sheet,'Data');
    const base=safeName(entry.output.value.replace(/\.xlsx$/i,''));let name=base+'.xlsx',n=2;while(used.has(name.toLowerCase()))name=base+'_'+(n++)+'.xlsx';used.add(name.toLowerCase());
    zip.file(name,XLSX.write(book,{bookType:'xlsx',type:'array',compression:true}));
   }
-  const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});downloadURL=URL.createObjectURL(blob);const link=el('csvDownload');link.href=downloadURL;link.download=safeName(el('csvZipName').value.replace(/\.zip$/i,''))+'.zip';link.hidden=false;link.click();statusCSV(`เสร็จแล้ว! ZIP มี Excel ${entries.length} ไฟล์`);
+  const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});downloadURL=URL.createObjectURL(blob);const link=el('csvDownload');link.href=downloadURL;link.download=safeName(el('csvZipName').value.replace(/\.zip$/i,''))+'.zip';link.hidden=false;link.click();statusCSV(`เสร็จแล้ว! ZIP มี Excel ${entries.length} ไฟล์ · G–I เป็นตัวเลข${keptText?" · "+keptText+" ช่องใน G–I ยังเป็นข้อความ เพราะไม่ใช่ตัวเลขหรือเกินความแม่นยำของ Excel":""}`);
  }catch(error){statusCSV('ยังไม่สร้าง ZIP: '+error.message,true);}finally{working=false;syncCSV();}
 };
 if(!window.Papa||!window.XLSX||!window.JSZip){statusCSV('โหลดเครื่องมือไม่สำเร็จ กรุณารีเฟรชหน้าเว็บ',true);el('csvFiles').disabled=true;}
