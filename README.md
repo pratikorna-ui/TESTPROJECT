@@ -90,7 +90,7 @@ Project 01 searchable remarks: default export uses `drawText` with Helvetica, pr
 
 ## Project 04 — Merge Excel files into one table
 
-Open `merge-excel.html`. Select up to 50 `.xlsx`/`.xls` files (100 MB each, 500 MB combined), choose one sheet and the header-row number per file, then inspect schemas/counts. Columns align by trimmed, NFC-normalized, case-insensitive header name. First occurrence determines output labels/order. Empty or duplicate header names reject analysis rather than guessing alignment.
+Open `merge-excel.html`. Select or drag/drop up to 50 `.xlsx`/`.xls`/`.csv` files (100 MB each, 500 MB combined), choose one sheet and the header-row number per file, then inspect schemas/counts. Columns align by trimmed, NFC-normalized, case-insensitive header name. First occurrence determines output labels/order. Empty or duplicate header names reject analysis rather than guessing alignment.
 
 Select output columns and optionally add `Source File (ต้นทาง)`. Missing columns are reported and exported as blank cells. Source rows retain input-file order, excluding fully empty rows; no deduplication is performed. Changing source sheet/header invalidates analysis and prior downloads. The source-name column receives a unique name on collision.
 
@@ -99,3 +99,6 @@ A worker reads sources sequentially using the existing compact XLSX reader (lega
 Cancellation terminates the worker. Canceling while inspecting a file can leave that file marked incomplete; remove that entry and reselect it. After canceling analysis/export, inspect again before downloading.
 
 Validation: `node tests/merge-workbook.cjs` covers incremental XLSX writing across buffer flushes, 5,000 rows, precise numeric values/formats, text IDs, Thai/XML escapes, reordered columns, Source File, duplicate-header rejection and date-1904 normalization. Browser checks covered per-file sheet/header choice, missing-column notices, output column selection, source on/off and stale-download invalidation. The output also opened independently with openpyxl, preserving ID, amount and decimal format.
+
+
+Project 04 CSV and drag/drop update: the drop region accepts incremental batches from different folders without replacing existing files. Files dropped during processing are queued; cancellation clears queued batches. The ordinary file picker remains available. CSV has per-file encoding (UTF-8, Windows-874, UTF-16) and delimiter controls, streaming decoding/parsing and strict malformed-quote validation. CSV cell values remain text, preserving leading zeros and decimal spelling; Excel source types remain unchanged. Mixed CSV/Excel files align through the same header schema and Source File option. Browser validation checked repeated and queued drops, mixed formats, comma/semicolon detection, selected output and preservation of existing files on invalid drops. `node tests/merge-workbook.cjs` additionally validates Thai Windows-874, UTF-16 CSV and malformed CSV rejection.

@@ -1,10 +1,33 @@
 'use strict';
-importScripts('vendor/xlsx.full.min.js','vendor/fflate.min.js','vendor/sax.js','acq-xlsx-reader.js?v=xml-ns-2');
+importScripts('vendor/papaparse.min.js','vendor/xlsx.full.min.js','vendor/fflate.min.js','vendor/sax.js','acq-xlsx-reader.js?v=xml-ns-2');
 const pause=()=>new Promise(r=>setTimeout(r,0));
 function progress(text,done,total){postMessage({type:'progress',text,done,total});}
 const key=s=>String(s).trim().normalize('NFC').toLowerCase();
 let analysis=null;
+async function openCSV(entry,full){
+ const file=entry.file,encoding=entry.encoding||'auto',previewOnly=!full,headerEnd=entry.header;let csvRows,bounds,detectedEncoding;
+ const sample=new Uint8Array(await file.slice(0,65536).arrayBuffer());let enc=encoding;
+ if(enc==='auto'){if(sample[0]===255&&sample[1]===254)enc='utf-16le';else if(sample[0]===254&&sample[1]===255)enc='utf-16be';else if(detectedEncoding)enc=detectedEncoding;else{const reader=file.stream().getReader(),decoder=new TextDecoder('utf-8',{fatal:true});try{while(true){const part=await reader.read();if(part.done)break;decoder.decode(part.value,{stream:true});}decoder.decode();enc='utf-8';}catch{enc='windows-874';}finally{await reader.cancel();}detectedEncoding=enc;}}
+ const sampleText=new TextDecoder(enc).decode(sample,{stream:true});const delimiter=!entry.delimiter||entry.delimiter==='auto'?Papa.parse(sampleText,{skipEmptyLines:true,preview:30}).meta.delimiter:entry.delimiter==='tab'?'\t':entry.delimiter;
+ csvRows=[];let maxCols=0,seen=0,pendingText='',readBytes=0,lastReport=0;
+ const sniff=Papa.parse(sampleText,{skipEmptyLines:true,preview:30}), parser=new Papa.Parser({delimiter,newline:sniff.meta.linebreak||'\n'}), decoder=new TextDecoder(enc,{fatal:true}), reader=file.stream().getReader();
+ try{while(true){
+  const chunk=await reader.read();readBytes+=chunk.value?.length||0;pendingText+=chunk.done?decoder.decode():decoder.decode(chunk.value,{stream:true});
+  const parsed=parser.parse(pendingText,0,!chunk.done);const errors=chunk.done?parsed.errors:parsed.errors.filter(error=>error.index<parsed.meta.cursor);if(errors.length)throw new Error(errors[0].message);pendingText=pendingText.slice(parsed.meta.cursor);
+  for(const row of parsed.data){if(row.some(v=>String(v).includes('\0')))throw new Error('CSV มี NUL กรุณาเลือก UTF-16 ให้ตรงกับต้นฉบับ');csvRows.push(row);maxCols=Math.max(maxCols,row.length);seen++;if(previewOnly&&seen>=headerEnd+21)break;}
+  if(previewOnly&&seen>=headerEnd+21)break;
+  if(readBytes-lastReport>=1024*1024){progress('กำลังอ่าน CSV… '+seen.toLocaleString()+' แถว',readBytes,file.size);lastReport=readBytes;await pause();}
+  if(chunk.done)break;
+ }}finally{await reader.cancel();}
+
+ if(full)while(csvRows.length&&csvRows[csvRows.length-1].every(v=>v===''))csvRows.pop();
+ // Empty terminal records do not contribute data rows.
+ bounds={s:{r:0,c:0},e:{r:Math.max(0,csvRows.length-1),c:Math.max(0,maxCols-1)}};
+ if(bounds.e.c>=16384||bounds.e.r>=1048576)throw new Error('เกินขีดจำกัด Excel');
+ const name='CSV';return {names:[name],name,bounds,cell:(r,c)=>csvRows[r]?.[c]===undefined?undefined:{t:'s',v:csvRows[r][c]},row:r=>csvRows[r],date1904:false};
+}
 async function open(entry,full=true){
+ if(/\.csv$/i.test(entry.file.name))return openCSV(entry,full);
  if(/\.xlsx$/i.test(entry.file.name)){const reader=new CompactXlsx(entry.file);await reader.metadata();const name=entry.sheet||reader.names[0];if(!reader.names.includes(name))throw new Error(entry.file.name+': ไม่พบชีต '+name);const bounds=await reader.read(name,full?Infinity:entry.header);return {names:reader.names,name,bounds,cell:(r,c)=>{const cell=reader.cell(r,c);if(cell?.t==='s')cell.v=String(cell.v).replace(/_x([0-9a-f]{4})_/gi,(_,hex)=>String.fromCharCode(parseInt(hex,16)));return cell;},row:r=>reader.rows[r],date1904:reader.date1904};}
  const book=XLSX.read(await entry.file.arrayBuffer(),{type:'array',dense:true,cellNF:true,cellText:false,sheetRows:full?0:entry.header});const name=entry.sheet||book.SheetNames[0],sheet=book.Sheets[name];if(!sheet)throw new Error('ไม่พบชีต '+name);const data=sheet['!data']||sheet;return {names:book.SheetNames,name,bounds:XLSX.utils.decode_range(sheet['!ref']||'A1'),cell:(r,c)=>data[r]?.[c],row:r=>data[r],date1904:!!book.Workbook?.WBProps?.date1904};
 }
@@ -39,4 +62,4 @@ async function merge(selected,includeSource){
   if(r%5000===0){progress(`กำลังรวม ${count.toLocaleString()} / ${analysis.total.toLocaleString()} แถว`,count,analysis.total);await pause();}
  }}if(count!==analysis.total)throw new Error('จำนวนแถวเปลี่ยน กรุณาตรวจไฟล์ใหม่');progress('กำลังบันทึก Excel…');return {blob:output.finish(),count,sourceName:includeSource?sourceName:null};
 }
-onmessage=async({data})=>{try{let result;if(data.action==='inspect'){const source=await open(data.entry,false);result={names:source.names,sheet:source.name};}else if(data.action==='analyze'){analysis=null;result=await analyze(data.entries);}else if(data.action==='merge')result=await merge(data.selected,data.includeSource);postMessage({type:'done',id:data.id,result});}catch(e){postMessage({type:'error',id:data.id,error:e.message});}};
+onmessage=async({data})=>{try{let result;if(data.action==='inspect'){const source=/\.csv$/i.test(data.entry.file.name)?{names:['CSV'],name:'CSV'}:await open(data.entry,false);result={names:source.names,sheet:source.name};}else if(data.action==='analyze'){analysis=null;result=await analyze(data.entries);}else if(data.action==='merge')result=await merge(data.selected,data.includeSource);postMessage({type:'done',id:data.id,result});}catch(e){postMessage({type:'error',id:data.id,error:e.message});}};
