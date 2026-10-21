@@ -87,3 +87,15 @@ Project 02 numeric-column regression: `node tests/csv-numbers.cjs` checks amount
 
 
 Project 01 searchable remarks: default export uses `drawText` with Helvetica, preserving original PDF content and page rotations. Preview uses the same PDF font widths for wrapping and positioning. A global mode selector retains the prior image workflow for Thai or fallback use. Browser validation exported 10 PDFs over all four page rotations and verified English/amount extraction, original text/page counts, no new image objects in text mode, explicit unsupported-character errors, and legacy image export. Git baseline before this change: `befc870`; revert the searchable-remark commit to roll back only this feature while preserving later work.
+
+## Project 04 — Merge Excel files into one table
+
+Open `merge-excel.html`. Select up to 50 `.xlsx`/`.xls` files (100 MB each, 500 MB combined), choose one sheet and the header-row number per file, then inspect schemas/counts. Columns align by trimmed, NFC-normalized, case-insensitive header name. First occurrence determines output labels/order. Empty or duplicate header names reject analysis rather than guessing alignment.
+
+Select output columns and optionally add `Source File (ต้นทาง)`. Missing columns are reported and exported as blank cells. Source rows retain input-file order, excluding fully empty rows; no deduplication is performed. Changing source sheet/header invalidates analysis and prior downloads. The source-name column receives a unique name on collision.
+
+A worker reads sources sequentially using the existing compact XLSX reader (legacy XLS uses SheetJS). Preview is capped at 20 rows. Export rereads one source at a time and incrementally writes one XLSX worksheet using fflate: it does not accumulate a worksheet cell object for every output row. XLSX styles preserve available numeric formats; values and cell types remain, formulas use cached results, unsafe formula references are not copied. Date-1904 inputs normalize to the output's 1900 epoch. Charts, images, complete styling and original layout are not merged. The output holds a single header and at most 1,048,575 data rows; exceeding that blocks export without dropping rows. The final compressed output and current source still use browser memory.
+
+Cancellation terminates the worker. Canceling while inspecting a file can leave that file marked incomplete; remove that entry and reselect it. After canceling analysis/export, inspect again before downloading.
+
+Validation: `node tests/merge-workbook.cjs` covers incremental XLSX writing across buffer flushes, 5,000 rows, precise numeric values/formats, text IDs, Thai/XML escapes, reordered columns, Source File, duplicate-header rejection and date-1904 normalization. Browser checks covered per-file sheet/header choice, missing-column notices, output column selection, source on/off and stale-download invalidation. The output also opened independently with openpyxl, preserving ID, amount and decimal format.
