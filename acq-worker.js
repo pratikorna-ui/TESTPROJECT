@@ -38,19 +38,19 @@ async function parse(previewOnly){
  full=!previewOnly;
 }
 function normalize(v,enabled){return enabled?v.trim().toUpperCase():v;}
-function compile(rules,normalized){return rules.map(rule=>({name:rule.name,mode:rule.mode,conditions:rule.conditions.map(c=>{
+function compile(rules,normalized){return rules.map(rule=>({name:rule.name,mode:rule.mode,alternatives:compile(rule.alternatives||[],normalized),conditions:rule.conditions.map(c=>{
  const col=XLSX.utils.decode_col(c.column);if(col>bounds.e.c)throw new Error(rule.name+': คอลัมน์ '+c.column+' อยู่นอก MASTER');
  const values=c.value.split(/[,\r\n]+/).map(s=>s.trim()).filter(Boolean).map(s=>normalize(s,normalized));return {...c,col,values,set:new Set(values)};
 })}));}
-function matches(r,rule,norm){const test=c=>{const actual=normalize(text(r,c.col),norm);if(c.op==='blank')return actual==='';if(c.op==='notblank')return actual!=='';if(c.op==='in')return c.set.has(actual);if(c.op==='notin')return !c.set.has(actual);if(c.op==='startswith')return c.values.some(v=>actual.startsWith(v));return c.values.some(v=>actual.includes(v));};return rule.mode==='AND'?rule.conditions.every(test):rule.conditions.some(test);}
+function matches(r,rule,norm){const test=c=>{const actual=normalize(text(r,c.col),norm);if(c.op==='blank')return actual==='';if(c.op==='notblank')return actual!=='';if(c.op==='in')return c.set.has(actual);if(c.op==='notin')return !c.set.has(actual);if(c.op==='startswith')return c.values.some(v=>actual.startsWith(v));return c.values.some(v=>actual.includes(v));};return (rule.mode==='AND'?rule.conditions.every(test):rule.conditions.some(test))||(rule.alternatives||[]).some(branch=>matches(r,branch,norm));}
 async function check(rules,norm){
- if(!full)await parse(false);const compiled=compile(rules,norm),groups=rules.map(rule=>({rule,rows:[]})),unmatched=[];let count=0,unique=0,overlap=0;
+ if(!full)await parse(false);const compiled=compile(rules,norm),groups=rules.map(rule=>({rule,rows:[]}));let unmatched=0,count=0,unique=0,overlap=0;
  for(let r=headerEnd;r<=bounds.e.r;r++){
-  if(nonempty(r)){count++;let hits=0;for(let g=0;g<groups.length;g++)if(matches(r,compiled[g],norm)){groups[g].rows.push(r);hits++;}if(!hits)unmatched.push(r);else unique++;if(hits>1)overlap++;}
+  if(nonempty(r)){count++;let hits=0;for(let g=0;g<groups.length;g++)if(matches(r,compiled[g],norm)){groups[g].rows.push(r);hits++;}if(!hits)unmatched++;else unique++;if(hits>1)overlap++;}
   if(r%10000===0){progress('กำลังแยก ACQ… '+r.toLocaleString()+' / '+(bounds.e.r+1).toLocaleString()+' แถว',r,bounds.e.r+1);await pause();}
  }
  if(!count)throw new Error('ไม่มีรายการหลังแถวหัวตาราง');checked={groups,unmatched,count,unique,overlap,normalized:norm};
- return {range:bounds,count,unique,overlap,unmatched:unmatched.length,groups:groups.map(g=>({name:g.rule.name,count:g.rows.length,preview:previewRows(g.rows)})),unmatchedPreview:previewRows(unmatched)};
+ return {range:bounds,count,unique,overlap,unmatched,groups:groups.map(g=>({name:g.rule.name,count:g.rows.length,preview:previewRows(g.rows)}))};
 }
 function safe(v){return v.replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').replace(/^\.+/,'').trim()||'ACQ';}
 function outputSheet(indices){
@@ -69,7 +69,7 @@ function outputSheet(indices){
 async function exportZip(partRows){
  if(!checked)throw new Error('กรุณาตรวจผลใหม่ก่อน');
  const zip=new JSZip(),used=new Set(['summary.xlsx']),manifest=[];
- const all=[...checked.groups,{rule:{name:'Unmatched'},rows:checked.unmatched}];
+ const all=checked.groups.filter(group=>group.rows.length>0);
  const jobs=all.reduce((n,g)=>n+Math.max(1,Math.ceil(g.rows.length/partRows)),0);let job=0;
  for(const group of all){const parts=Math.max(1,Math.ceil(group.rows.length/partRows));for(let part=0;part<parts;part++){
   progress(`กำลังสร้าง ${group.rule.name} · ส่วน ${part+1}/${parts}`,job,jobs);await pause();
@@ -78,7 +78,7 @@ async function exportZip(partRows){
   const base=safe(group.rule.name)+(parts>1?'_part'+String(part+1).padStart(3,'0'):'');let filename=base+'.xlsx',suffix=2;while(used.has(filename.toLowerCase()))filename=base+'_'+(suffix++)+'.xlsx';used.add(filename.toLowerCase());
   const bytes=XLSX.write(wb,{type:'array',bookType:'xlsx',compression:true});zip.file(filename,bytes);manifest.push([group.rule.name,filename,chosen.length]);job++;
  }}
- const summary=[['Source',file.name],['Sheet',selectedName],['Header rows',headerEnd],['Normalize matching',checked.normalized],['Input transactions',checked.count],['Unique matched',checked.unique],['Unmatched',checked.unmatched.length],['Rows matching multiple ACQs',checked.overlap],[],['ACQ','Count','Mode','Rules'],...checked.groups.map(g=>[g.rule.name,g.rows.length,g.rule.mode,g.rule.conditions.map(c=>`${c.column} ${c.op} [${c.value}]`).join(' '+g.rule.mode+' ')]),[],['ACQ','Output file','Transactions'],...manifest];
+ const summary=[['Source',file.name],['Sheet',selectedName],['Header rows',headerEnd],['Normalize matching',checked.normalized],['Input transactions',checked.count],['Unique matched',checked.unique],['Unmatched',checked.unmatched],['Rows matching multiple ACQs',checked.overlap],[],['ACQ','Count','Mode','Rules'],...checked.groups.map(g=>[g.rule.name,g.rows.length,g.rule.mode,[g.rule,...(g.rule.alternatives||[])].map(branch=>'('+branch.conditions.map(c=>`${c.column} ${c.op} [${c.value}]`).join(' '+branch.mode+' ')+')').join(' OR ')]),[],['ACQ','Output file','Transactions'],...manifest];
  const b=XLSX.utils.book_new();XLSX.utils.book_append_sheet(b,XLSX.utils.aoa_to_sheet(summary),'Summary');zip.file('Summary.xlsx',XLSX.write(b,{type:'array',bookType:'xlsx',compression:true}));
  progress('กำลังรวม ZIP…');const blob=await zip.generateAsync({type:'blob',compression:'STORE'},meta=>progress('กำลังรวม ZIP… '+Math.round(meta.percent)+'%',meta.percent,100));return blob;
 }
