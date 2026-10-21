@@ -7,4 +7,4 @@ const rows=[['ID','','','','','','G','H','I'],['001234567890123456789','','','',
 const sheet=XLSX.utils.aoa_to_sheet(rows);for(let c=6;c<=8;c++)sheet[XLSX.utils.encode_cell({r:1,c})]=numeric(rows[1][c]);
 const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,'Data');const result=XLSX.read(XLSX.write(book,{type:'array',bookType:'xlsx'}),{type:'array',cellNF:true}).Sheets.Data;
 assert.equal(result.A2.t,'s');assert.equal(result.A2.v,rows[1][0]);assert.equal(result.G1.t,'s');assert.equal(result.G2.t,'n');assert.equal(result.G2.v,1234.5);assert.equal(result.G2.z,'0.00');assert.equal(result.H2.v,1234.5);assert.equal(result.I2.v,-0.75);
-console.log('PASS: G–I numeric XLSX round-trip, decimals and grouping, negatives, headers and IDs preserved, invalid/unsafe numbers kept as text');
+console.log('PASS: Numeric amount XLSX round-trip, decimals and grouping, negatives, headers and IDs preserved, invalid/unsafe numbers kept as text');

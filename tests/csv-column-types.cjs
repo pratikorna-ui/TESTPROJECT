@@ -1,0 +1,3 @@
+const assert=require('node:assert/strict'),suggest=require('../csv-numbers.js').suggest;
+for(const [name,values,type]of [['Amount',['12.50','1,234.00'],'number'],['Quantity',['1','2'],'number'],['Account Number',['1234567890','1234567891'],'text'],['Code',['0012','0013'],'text'],['Mixed',['12.50','unknown'],'text'],['Date',['01/02/2026'],'text'],['Other',['1234','5678'],'text'],['Other',['0.50','12.00'],'number'],['Amount',['12345678901234567'],'text'],['Other',['0000000000000000'],'text'],['Empty',['',' '],'text']])assert.equal(suggest(name,values).type,type,name);
+console.log('PASS: conservative column inference for amounts, quantities, identifiers, leading zeros, large integers, dates, mixed and empty columns');

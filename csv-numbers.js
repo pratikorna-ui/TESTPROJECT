@@ -15,3 +15,23 @@ function csvNumberCell(value) {
   return {t: 'n', v: number, z: (text.includes(',') ? '#,##0' : '0') + (decimals ? '.' + '0'.repeat(decimals) : '')};
 }
 if (typeof module !== 'undefined') module.exports = csvNumberCell;
+
+function csvColumnSuggestion(header, values) {
+  const name=String(header).trim();
+  if (/(?:\b(?:id|account|acct|card|phone|mobile|tel|code|reference|ref|date|time|zip|postal)\b|account.?number|รหัส|บัญชี|บัตร|โทร|อ้างอิง|วันที่|เวลา|ไปรษณีย์)/i.test(name.replace(/[_-]/g,' ')))
+    return {type:'text',reason:'ชื่อคอลัมน์คล้ายรหัส บัญชี หรือวันที่ จึงเก็บเป็นข้อความ'};
+  let count=0, decimal=false;
+  for(const value of values){
+    const text=String(value??'').trim();if(!text)continue;count++;
+    const plain=text.replace(/,/g,'').replace(/^[+(\-]|\)$/g,'');
+    if(/^0\d/.test(plain))return {type:'text',reason:'มีเลขศูนย์นำหน้า เก็บเป็นข้อความเพื่อไม่ให้ศูนย์หาย'};
+    if(/^\d{16,}$/.test(plain))return {type:'text',reason:'มีเลขยาวเกิน 15 หลัก เก็บเป็นข้อความป้องกันเลขเพี้ยน'};
+    if(!csvNumberCell(text))return {type:'text',reason:'มีข้อความ วันที่ หรือค่าที่แปลงเป็นตัวเลขอย่างปลอดภัยไม่ได้'};
+    if(text.includes('.')||text.includes(','))decimal=true;
+  }
+  if(!count)return {type:'text',reason:'ไม่มีข้อมูล เก็บเป็นข้อความ'};
+  if(decimal||/(?:amount|balance|deposit|withdraw|total|price|fee|tax|rate|quantity|count|qty|ยอด|จำนวน|ราคา|เงิน|ค่าธรรมเนียม|ภาษี)/i.test(name))
+    return {type:'number',reason:'ข้อมูลทุกแถวเป็นตัวเลข และมีทศนิยมหรือชื่อคอลัมน์บอกจำนวน'};
+  return {type:'text',reason:'เป็นเลขจำนวนเต็มที่อาจเป็นรหัส จึงให้เลือกยืนยันเอง'};
+}
+if(typeof module!=='undefined')module.exports.suggest=csvColumnSuggestion;

@@ -20,7 +20,7 @@ function repairCSV(text,encoding){
  try{return new TextDecoder('utf-8',{fatal:true}).decode(new Uint8Array(bytes));}catch{throw new Error('ข้อความไม่ตรงกับวิธีซ่อมนี้ กรุณาเปลี่ยนตัวเลือก');}
 }
 function parseEntry(entry){
- invalidateCSV();entry.rows=null;entry.info.classList.remove('csv-error');entry.preview.replaceChildren();
+ invalidateCSV();entry.rows=null;entry.info.classList.remove('csv-error');entry.preview.replaceChildren();entry.typePanel.replaceChildren();
  try{
   const decoded=decodeCSV(entry.bytes,entry.encoding.value);let text=repairCSV(decoded.text,entry.repair.value).replace(/^\uFEFF/,'');
   if(text.includes('\u0000'))throw new Error('พบอักขระ NUL ลองเลือก UTF-16 LE / BE ให้ตรงกับต้นฉบับ');
@@ -32,17 +32,33 @@ function parseEntry(entry){
   let cells=0,width=0;for(const row of rows){width=Math.max(width,row.length);cells+=row.length;for(const cell of row)if(cell.length>32767)throw new Error('มีเซลล์ยาวเกินขีดจำกัด Excel (32,767 ตัวอักษร)');}
   if(rows.length>1048576||width>16384)throw new Error('จำนวนแถวหรือคอลัมน์เกินขีดจำกัด Excel');
   if(cells>500000)throw new Error('ไฟล์ใหญ่เกิน 500,000 เซลล์ กรุณาแบ่งไฟล์ก่อน');
-  entry.rows=rows;entry.cells=cells;
+  entry.rows=rows;entry.cells=cells;setupTypes(entry,width);
   entry.info.textContent=`อ่านด้วย ${decoded.encoding.toUpperCase()} · ${rows.length.toLocaleString()} แถว × สูงสุด ${width} คอลัมน์ · ตัวคั่น ${JSON.stringify(parsed.meta.delimiter)} · ตัวอย่าง 8 แถว / 12 คอลัมน์`;
   if(decoded.encoding==='windows-874'&&entry.encoding.value==='auto')entry.info.textContent+=' · เดาเป็นภาษาไทย Windows-874 กรุณาตรวจข้อความ';
   if(text.includes('�'))entry.info.textContent+=' · พบ � บางข้อความอาจเสียหายในต้นฉบับ';
-  const table=document.createElement('table');for(const row of rows.slice(0,8)){const tr=table.insertRow();for(const value of row.slice(0,12))tr.insertCell().textContent=value;}entry.preview.append(table);
+  renderTypedPreview(entry);
  }catch(error){entry.info.textContent=error.message;entry.info.classList.add('csv-error');}syncCSV();
+}
+function columnType(entry,c){return entry.types[c].select.value==='auto'?entry.types[c].suggestion.type:entry.types[c].select.value;}
+function renderTypedPreview(entry){
+ entry.preview.replaceChildren();const table=document.createElement('table');
+ entry.rows.slice(0,8).forEach((row,r)=>{const tr=table.insertRow();row.slice(0,12).forEach((value,c)=>{const td=tr.insertCell(),number=r>0&&columnType(entry,c)==='number'?csvNumberCell(value):null;td.textContent=number?XLSX.SSF.format(number.z,number.v):value;td.dataset.type=number?'number':'text';td.title=number?'ตัวเลข':'ข้อความ';});});entry.preview.append(table);
+}
+function setupTypes(entry,width){
+ entry.typePanel.replaceChildren();entry.types=[];
+ for(let c=0;c<width;c++){
+  const suggestion=csvColumnSuggestion(entry.rows[0]?.[c]||'',entry.rows.slice(1).map(row=>row[c]??''));
+  const label=document.createElement('label'),title=document.createElement('span'),select=document.createElement('select'),note=document.createElement('small');
+  title.textContent=`${XLSX.utils.encode_col(c)} · ${entry.rows[0]?.[c]||'ไม่มีชื่อคอลัมน์'}`;
+  select.add(new Option('อัตโนมัติ → '+(suggestion.type==='number'?'ตัวเลข':'ข้อความ'),'auto'));select.add(new Option('ข้อความ · เก็บค่าตามต้นฉบับ','text'));select.add(new Option('ตัวเลข · ใช้คำนวณได้','number'));
+  note.textContent=suggestion.reason;note.className='muted';select.onchange=()=>{invalidateCSV();renderTypedPreview(entry);note.textContent=select.value==='auto'?suggestion.reason:select.value==='number'?'แปลงค่าที่ปลอดภัยเป็นตัวเลข ศูนย์นำหน้าอาจหาย ค่าที่แปลงไม่ได้ยังเป็นข้อความ':'เก็บเป็นข้อความตามต้นฉบับ';};
+  label.append(title,select,note);entry.typePanel.append(label);entry.types.push({select,suggestion});
+ }
 }
 function addEntry(file,bytes){
  const entry={file,bytes};entries.push(entry);const box=document.createElement('section');entry.box=box;box.className='panel csv-item';
- box.innerHTML='<div class="row"><h2 class="filename"></h2><button class="remove">ลบ</button></div><div class="csv-controls"><label>อ่านไฟล์ด้วย<select class="encoding"><option value="auto">ตรวจอัตโนมัติ (ไทย / UTF)</option><option value="utf-8">UTF-8</option><option value="windows-874">Thai · Windows-874 / TIS-620</option><option value="windows-1252">Western · Windows-1252</option><option value="utf-16le">UTF-16 LE</option><option value="utf-16be">UTF-16 BE</option></select></label><label>ซ่อมข้อความที่เพี้ยนมาแล้ว<select class="repair"><option value="none">ไม่ซ่อม (ค่าเริ่มต้น)</option><option value="windows-1252">เช่น à¸… → ภาษาไทย (Western)</option><option value="windows-874">เช่น เธ… → ภาษาไทย (Thai)</option></select></label><label>ตัวคั่นคอลัมน์<select class="delimiter"><option value="auto">ตรวจอัตโนมัติ</option><option value=",">Comma (,)</option><option value=";">Semicolon (;)</option><option value="tab">Tab</option><option value="|">Pipe (|)</option></select></label><label>ชื่อไฟล์ Excel<input class="output" maxlength="120"></label></div><p class="csv-info" role="status"></p><div class="csv-preview"></div>';
- box.querySelector('h2').textContent=file.name;for(const key of ['encoding','repair','delimiter','output'])entry[key]=box.querySelector('.'+key);entry.info=box.querySelector('.csv-info');entry.preview=box.querySelector('.csv-preview');entry.output.value=file.name.replace(/\.csv$/i,'')+'.xlsx';
+ box.innerHTML='<div class="row"><h2 class="filename"></h2><button class="remove">ลบ</button></div><div class="csv-controls"><label>อ่านไฟล์ด้วย<select class="encoding"><option value="auto">ตรวจอัตโนมัติ (ไทย / UTF)</option><option value="utf-8">UTF-8</option><option value="windows-874">Thai · Windows-874 / TIS-620</option><option value="windows-1252">Western · Windows-1252</option><option value="utf-16le">UTF-16 LE</option><option value="utf-16be">UTF-16 BE</option></select></label><label>ซ่อมข้อความที่เพี้ยนมาแล้ว<select class="repair"><option value="none">ไม่ซ่อม (ค่าเริ่มต้น)</option><option value="windows-1252">เช่น à¸… → ภาษาไทย (Western)</option><option value="windows-874">เช่น เธ… → ภาษาไทย (Thai)</option></select></label><label>ตัวคั่นคอลัมน์<select class="delimiter"><option value="auto">ตรวจอัตโนมัติ</option><option value=",">Comma (,)</option><option value=";">Semicolon (;)</option><option value="tab">Tab</option><option value="|">Pipe (|)</option></select></label><label>ชื่อไฟล์ Excel<input class="output" maxlength="120"></label></div><p class="csv-info" role="status"></p><details class="type-details" open><summary>ชนิดข้อมูลรายคอลัมน์ · เปลี่ยนได้ก่อนแปลง</summary><div class="column-types"></div></details><div class="csv-preview"></div>';
+ box.querySelector('h2').textContent=file.name;for(const key of ['encoding','repair','delimiter','output'])entry[key]=box.querySelector('.'+key);entry.info=box.querySelector('.csv-info');entry.preview=box.querySelector('.csv-preview');entry.typePanel=box.querySelector('.column-types');entry.output.value=file.name.replace(/\.csv$/i,'')+'.xlsx';
  for(const key of ['encoding','repair','delimiter'])entry[key].onchange=()=>parseEntry(entry);entry.output.oninput=invalidateCSV;
  box.querySelector('button').onclick=()=>{entries.splice(entries.indexOf(entry),1);box.remove();invalidateCSV();syncCSV();};el('csvItems').append(box);parseEntry(entry);
 }
@@ -65,8 +81,9 @@ el('convert').onclick=async()=>{
   for(let i=0;i<entries.length;i++){
    const entry=entries[i];statusCSV(`กำลังแปลง ${i+1} / ${entries.length}: ${entry.file.name}`);await new Promise(resolve=>setTimeout(resolve,0));
    const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(entry.rows);
-   // Row 1 is the header; only physical columns G, H, I become numbers.
-   for(let r=1;r<entry.rows.length;r++)for(let c=6;c<=8;c++){
+   // Header stays text. Apply the inferred or explicitly selected type to each column.
+   for(let r=1;r<entry.rows.length;r++)for(let c=0;c<entry.types.length;c++){
+    if(columnType(entry,c)!=='number')continue;
     const value=entry.rows[r][c];if(value===undefined||!String(value).trim())continue;
     const numeric=csvNumberCell(value);
     if(numeric)sheet[XLSX.utils.encode_cell({r,c})]=numeric;else keptText++;
@@ -76,7 +93,7 @@ el('convert').onclick=async()=>{
    const base=safeName(entry.output.value.replace(/\.xlsx$/i,''));let name=base+'.xlsx',n=2;while(used.has(name.toLowerCase()))name=base+'_'+(n++)+'.xlsx';used.add(name.toLowerCase());
    zip.file(name,XLSX.write(book,{bookType:'xlsx',type:'array',compression:true}));
   }
-  const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});downloadURL=URL.createObjectURL(blob);const link=el('csvDownload');link.href=downloadURL;link.download=safeName(el('csvZipName').value.replace(/\.zip$/i,''))+'.zip';link.hidden=false;link.click();statusCSV(`เสร็จแล้ว! ZIP มี Excel ${entries.length} ไฟล์ · G–I เป็นตัวเลข${keptText?" · "+keptText+" ช่องใน G–I ยังเป็นข้อความ เพราะไม่ใช่ตัวเลขหรือเกินความแม่นยำของ Excel":""}`);
+  const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});downloadURL=URL.createObjectURL(blob);const link=el('csvDownload');link.href=downloadURL;link.download=safeName(el('csvZipName').value.replace(/\.zip$/i,''))+'.zip';link.hidden=false;link.click();statusCSV(`เสร็จแล้ว! ZIP มี Excel ${entries.length} ไฟล์ · ใช้ชนิดข้อมูลตามที่เลือก${keptText?" · "+keptText+" ช่องในคอลัมน์ตัวเลขยังเป็นข้อความ เพราะไม่ใช่ตัวเลขหรือเกินความแม่นยำของ Excel":""}`);
  }catch(error){statusCSV('ยังไม่สร้าง ZIP: '+error.message,true);}finally{working=false;syncCSV();}
 };
 if(!window.Papa||!window.XLSX||!window.JSZip){statusCSV('โหลดเครื่องมือไม่สำเร็จ กรุณารีเฟรชหน้าเว็บ',true);el('csvFiles').disabled=true;}
