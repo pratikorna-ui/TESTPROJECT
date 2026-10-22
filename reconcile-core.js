@@ -1,0 +1,13 @@
+'use strict';
+const ReconcileCore=(()=>{
+ function date(y,m,d){y=Number(y);m=Number(m);d=Number(d);const x=new Date(Date.UTC(y,m-1,d));if(y<1900||y>2199||x.getUTCFullYear()!==y||x.getUTCMonth()+1!==m||x.getUTCDate()!==d)return null;return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;}
+ function fileDate(value){const s=String(value??'');const preferred=s.match(/(?:^|\D)((?:19|20|21)\d{6})(?=\.xlsx?(?:_|$))/i);if(preferred)return date(preferred[1].slice(0,4),preferred[1].slice(4,6),preferred[1].slice(6,8));const matches=Array.from(s.matchAll(/(?:^|\D)((?:19|20|21)\d{6})(?=\D|$)/g),m=>date(m[1].slice(0,4),m[1].slice(4,6),m[1].slice(6,8))).filter(Boolean);return matches.length===1?matches[0]:null;}
+ function settlement(value,serialParser,epoch=false){if(value instanceof Date)return date(value.getUTCFullYear(),value.getUTCMonth()+1,value.getUTCDate());const s=String(value??'').trim();let m;if((m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$/)))return date(m[1],m[2],m[3]);if((m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:\s.*)?$/)))return date(m[3],m[2],m[1]);if(/^\d{8}$/.test(s)){const d=date(s.slice(0,4),s.slice(4,6),s.slice(6,8));if(d)return d;}if(typeof value==='number'&&Number.isFinite(value)){const parsed=serialParser(value,{date1904:epoch});return parsed?date(parsed.y,parsed.m,parsed.d):null;}return null;}
+ function decimal(value){if(value===undefined||value===null||String(value).trim()==='')return {value:0n,scale:0,blank:true};let s=String(value).trim();if(/^\(.*\)$/.test(s))s='-'+s.slice(1,-1).trim();if(!/^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(s))return null;s=s.replace(/,/g,'');const m=s.match(/^([+-]?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i),exp=Number(m[4]||0);if(Math.abs(exp)>100)return null;let scale=(m[3]||'').length-exp,n=BigInt((m[1]==='-'?'-':'')+m[2]+(m[3]||''));if(scale<0){n*=10n**BigInt(-scale);scale=0;}return {value:n,scale,blank:false};}
+ function accumulator(){return {value:0n,scale:0,invalid:0,blanks:0};}
+ function add(sum,value){const d=decimal(value);if(!d){sum.invalid++;return false;}if(d.blank){sum.blanks++;return true;}const scale=Math.max(sum.scale,d.scale);sum.value=sum.value*10n**BigInt(scale-sum.scale)+d.value*10n**BigInt(scale-d.scale);sum.scale=scale;return true;}
+ function amount(sum){const scale=Math.max(2,sum.scale),n=sum.value*10n**BigInt(scale-sum.scale),sign=n<0n?'-':'',s=(n<0n?-n:n).toString().padStart(scale+1,'0');return sign+s.slice(0,-scale)+'.'+s.slice(-scale);}
+ function showDate(d){return d?d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4):'ไม่ทราบวันที่';}
+ return {date,fileDate,settlement,decimal,accumulator,add,amount,showDate};
+})();
+if(typeof module!=='undefined')module.exports=ReconcileCore;
