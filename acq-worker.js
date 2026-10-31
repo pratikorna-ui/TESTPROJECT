@@ -66,7 +66,12 @@ function outputSheet(indices){
  if(sheet?.['!merges'])out['!merges']=sheet['!merges'].filter(m=>m.e.r<headerEnd);
  return out;
 }
-async function exportZip(partRows){
+function outputDateStamp(value){
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(value||''))throw new Error('กรุณาเลือกวันที่ในชื่อไฟล์ Output');
+ const d=new Date(value+'T00:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==value)throw new Error('วันที่ในชื่อไฟล์ไม่ถูกต้อง');return value.replace(/-/g,'');
+}
+async function exportZip(partRows,outputDate){
+ const stamp=outputDateStamp(outputDate);
  if(!checked)throw new Error('กรุณาตรวจผลใหม่ก่อน');
  const zip=new JSZip(),used=new Set(['summary.xlsx']),manifest=[];
  const all=checked.groups.filter(group=>group.rows.length>0);
@@ -75,10 +80,10 @@ async function exportZip(partRows){
   progress(`กำลังสร้าง ${group.rule.name} · ส่วน ${part+1}/${parts}`,job,jobs);await pause();
   const chosen=group.rows.slice(part*partRows,(part+1)*partRows),indices=[...Array.from({length:headerEnd},(_,i)=>i),...chosen];
   const worksheet=outputSheet(indices),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,worksheet,'Transactions');if(compact?.date1904)wb.Workbook={WBProps:{date1904:true}};
-  const base=safe(group.rule.name)+(parts>1?'_part'+String(part+1).padStart(3,'0'):'');let filename=base+'.xlsx',suffix=2;while(used.has(filename.toLowerCase()))filename=base+'_'+(suffix++)+'.xlsx';used.add(filename.toLowerCase());
+  const base=safe(group.rule.name)+'_'+stamp+(parts>1?'_part'+String(part+1).padStart(3,'0'):'');let filename=base+'.xlsx',suffix=2;while(used.has(filename.toLowerCase()))filename=base+'_'+(suffix++)+'.xlsx';used.add(filename.toLowerCase());
   const bytes=XLSX.write(wb,{type:'array',bookType:'xlsx',compression:true});zip.file(filename,bytes);manifest.push([group.rule.name,filename,chosen.length]);job++;
  }}
- const summary=[['Source',file.name],['Sheet',selectedName],['Header rows',headerEnd],['Normalize matching',checked.normalized],['Input transactions',checked.count],['Unique matched',checked.unique],['Unmatched',checked.unmatched],['Rows matching multiple ACQs',checked.overlap],[],['ACQ','Count','Mode','Rules'],...checked.groups.map(g=>[g.rule.name,g.rows.length,g.rule.mode,[g.rule,...(g.rule.alternatives||[])].map(branch=>'('+branch.conditions.map(c=>`${c.column} ${c.op} [${c.value}]`).join(' '+branch.mode+' ')+')').join(' OR ')]),[],['ACQ','Output file','Transactions'],...manifest];
+ const summary=[['Source',file.name],['Output filename date',outputDate],['Sheet',selectedName],['Header rows',headerEnd],['Normalize matching',checked.normalized],['Input transactions',checked.count],['Unique matched',checked.unique],['Unmatched',checked.unmatched],['Rows matching multiple ACQs',checked.overlap],[],['ACQ','Count','Mode','Rules'],...checked.groups.map(g=>[g.rule.name,g.rows.length,g.rule.mode,[g.rule,...(g.rule.alternatives||[])].map(branch=>'('+branch.conditions.map(c=>`${c.column} ${c.op} [${c.value}]`).join(' '+branch.mode+' ')+')').join(' OR ')]),[],['ACQ','Output file','Transactions'],...manifest];
  const b=XLSX.utils.book_new();XLSX.utils.book_append_sheet(b,XLSX.utils.aoa_to_sheet(summary),'Summary');zip.file('Summary.xlsx',XLSX.write(b,{type:'array',bookType:'xlsx',compression:true}));
  progress('กำลังรวม ZIP…');const blob=await zip.generateAsync({type:'blob',compression:'STORE'},meta=>progress('กำลังรวม ZIP… '+Math.round(meta.percent)+'%',meta.percent,100));return blob;
 }
@@ -92,6 +97,6 @@ onmessage=async({data})=>{try{
   await parse(true);const indices=Array.from({length:Math.min(headerEnd+20,bounds.e.r+1)},(_,i)=>i);
   result={...result,sheet:selectedName,range:bounds,preview:previewRows(indices,headerEnd+20),estimatedRows:full?bounds.e.r+1:null};
  }else if(data.action==='check')result=await check(data.rules,data.normalize);
- else if(data.action==='export')result=await exportZip(data.partRows);
+ else if(data.action==='export')result=await exportZip(data.partRows,data.outputDate);
  postMessage({type:'done',id:data.id,result});
  }catch(e){postMessage({type:'error',id:data.id,error:e.message||String(e)});}};
