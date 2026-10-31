@@ -15,6 +15,13 @@ const StatementMerge=(()=>{
   if(els(sheet,'f').some(n=>n.textContent.includes('!')||/\[[^\]]+\]/.test(n.textContent)))throw Error(entry.name+': มีสูตรอ้างอิงชีต/ไฟล์หรือตารางอื่น กรุณาเปลี่ยนสูตรเป็นค่าก่อน เพื่อป้องกันยอดผิด');
   if(els(sheet,'sheetProtection').length)warnings.push(entry.name+': มีการป้องกันชีตตามต้นฉบับ');
   const srcStylesFile=src.zip.file('xl/styles.xml');const sourceStyles=srcStylesFile?xml(await srcStylesFile.async('string')):xml(`<styleSheet xmlns="${NS}"/>`),offsets={},fmt=new Map();
+  // Convert only approved text cells, adding styles without rebuilding the worksheet.
+  if(entry.changes&&Object.keys(entry.changes).length){
+   let xfs=els(sourceStyles,'cellXfs')[0],fmts=els(sourceStyles,'numFmts')[0];if(!xfs)throw Error('ไม่พบรูปแบบเซลล์ต้นทาง');if(!fmts){fmts=sourceStyles.createElementNS(NS,'numFmts');sourceStyles.documentElement.prepend(fmts);}
+   let formatId=Math.max(163,...Array.from(fmts.children,n=>Number(n.getAttribute('numFmtId'))))+1;const cache=new Map();
+   for(const c of els(sheet,'c')){const change=entry.changes[c.getAttribute('r')];if(!change||els(c,'f').length)continue;const old=Number(c.getAttribute('s')||0),key=old+'|'+change.z;let style=cache.get(key);if(style===undefined){const xf=xfs.children[old].cloneNode(true),nf=sourceStyles.createElementNS(NS,'numFmt');nf.setAttribute('numFmtId',formatId);nf.setAttribute('formatCode',change.z);fmts.append(nf);xf.setAttribute('numFmtId',formatId++);xf.setAttribute('applyNumberFormat','1');style=xfs.children.length;xfs.append(xf);cache.set(key,style);}c.setAttribute('s',style);c.setAttribute('t','n');Array.from(c.children).forEach(n=>n.remove());const v=sheet.createElementNS(NS,'v');v.textContent=String(change.v);c.append(v);}
+   xfs.setAttribute('count',xfs.children.length);fmts.setAttribute('count',fmts.children.length);
+  }
   for(const name of ['numFmts','fonts','fills','borders','cellStyleXfs','cellXfs','cellStyles','dxfs']){
    let target=els(styles,name)[0];const source=els(sourceStyles,name)[0];if(!source)continue;if(!target){target=styles.createElementNS(NS,name);styles.documentElement.append(target);}offsets[name]=target.children.length;
    for(const original of Array.from(source.children)){const n=styles.importNode(original,true);if(name==='numFmts'){const old=n.getAttribute('numFmtId');n.setAttribute('numFmtId',String(nextFmt));fmt.set(old,nextFmt++);}

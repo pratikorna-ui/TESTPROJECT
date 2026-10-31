@@ -1,0 +1,6 @@
+'use strict';
+const StatementTypes=(()=>{
+ function analyze(sheet,header=1){const range=XLSX.utils.decode_range(sheet['!ref']||'A1'),columns=[];for(let c=range.s.c;c<=range.e.c;c++){const cell=sheet[XLSX.utils.encode_cell({r:header-1,c})],title=String(cell?.v??''),values=[];for(let r=header;r<=range.e.r;r++){const v=sheet[XLSX.utils.encode_cell({r,c})]?.v;if(v!==undefined&&String(v).trim()!=='-')values.push(v);}const suggestion=csvColumnSuggestion(title,values);columns.push({c,title,suggestion,samples:values.slice(0,4).map(String)});}return columns;}
+ function plan(sheet,header,columns,modes={}){const changes={},range=XLSX.utils.decode_range(sheet['!ref']||'A1');let converted=0,kept=0;for(const col of columns){const mode=modes[col.c]||'auto',number=mode==='number'||(mode==='auto'&&col.suggestion.type==='number');if(!number)continue;for(let r=header;r<=range.e.r;r++){const ref=XLSX.utils.encode_cell({r,c:col.c}),cell=sheet[ref];if(!cell||cell.f||cell.t!=='s'||!String(cell.v).trim())continue;const text=String(cell.v).trim(),plain=text.replace(/,/g,'').replace(/^[+(\-]|\)$/g,'');if(/^0\d/.test(plain)||/^\d{16,}$/.test(plain)){kept++;continue;}const value=csvNumberCell(text);if(value){changes[ref]=value;converted++;}else kept++;}}return {changes,converted,kept};}
+ return {analyze,plan};
+})();
