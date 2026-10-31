@@ -25,7 +25,7 @@ function invalidate(){results=null;byId('result').replaceChildren();byId('export
 function lock(value){pending=value;document.querySelectorAll('input,select,textarea,button').forEach(e=>e.disabled=value);byId('cancelWork').disabled=!value;byId('cancelBottom').disabled=!value;byId('masterSheet').disabled=value||!loaded;byId('check').disabled=value||!loaded;byId('exportAcq').disabled=value||!results;byId('workProgress').hidden=!value;if(value)byId('workProgress').removeAttribute('value');}
 function stopWorker(reason){if(worker)worker.terminate();worker=null;loaded=false;const request=current;current=null;if(request)request.reject(new Error(reason));lock(false);}
 function runWorker(action,extra={}){
- if(!worker){worker=new Worker('acq-worker.js?v=dated-1');const instance=worker;worker.onmessage=({data})=>{if(worker!==instance)return;
+ if(!worker){worker=new Worker('acq-worker.js?v=source-date-1');const instance=worker;worker.onmessage=({data})=>{if(worker!==instance)return;
   if(data.type==='progress'){notify(data.text);if(data.total){byId('workProgress').max=data.total;byId('workProgress').value=data.done;}else byId('workProgress').removeAttribute('value');return;}
   if(!current||data.id!==current.id)return;const request=current;current=null;if(data.type==='error')request.reject(new Error(data.error));else request.resolve(data.result);
  };worker.onerror=()=>{stopWorker('เครื่องมือประมวลผลหยุดทำงาน อาจมีหน่วยความจำไม่พอ กดอ่านไฟล์ใหม่เพื่อลองอีกครั้ง');notify('เครื่องมือประมวลผลหยุดทำงาน กดอ่านไฟล์ใหม่เพื่อลองอีกครั้ง',true);};}
@@ -81,12 +81,10 @@ async function checkRules(){
 }
 async function exportResults(){
  if(pending||!results)return;lock(true);
- try{const outputDate=byId('outputDate').value;if(!outputDate||!byId('outputDate').checkValidity())throw new Error('กรุณาเลือกวันที่ในชื่อไฟล์ Output');const blob=await runWorker('export',{partRows:Number(byId('partRows').value),outputDate});outputUrl=URL.createObjectURL(blob);const link=byId('acqDownload');link.href=outputUrl;link.download=source.name.replace(/\.[^.]+$/,'').replace(/[\\/:*?"<>|]/g,'_')+'_ACQ.zip';link.hidden=false;link.click();notify(results.unique?'เสร็จแล้ว! ZIP มีเฉพาะรายการตรง ACQ พร้อม Summary (ไม่มีไฟล์ Unmatched)':'ไม่มีรายการตรงกฎ ZIP มีเฉพาะ Summary สำหรับตรวจจำนวน');}
+ try{const blob=await runWorker('export',{partRows:Number(byId('partRows').value)});outputUrl=URL.createObjectURL(blob);const link=byId('acqDownload');link.href=outputUrl;link.download=source.name.replace(/\.[^.]+$/,'').replace(/[\\/:*?"<>|]/g,'_')+'_ACQ.zip';link.hidden=false;link.click();notify(results.unique?'เสร็จแล้ว! ZIP มีเฉพาะรายการตรง ACQ พร้อม Summary (ไม่มีไฟล์ Unmatched)':'ไม่มีรายการตรงกฎ ZIP มีเฉพาะ Summary สำหรับตรวจจำนวน');}
  catch(e){notify('ยังไม่สร้าง ZIP: '+e.message,true);}finally{lock(false);}
 }
 byId('master').onchange=()=>{source=byId('master').files[0]||null;byId('masterSheet').replaceChildren();loadMaster();};byId('masterSheet').onchange=loadMaster;byId('headerEnd').onchange=loadMaster;byId('masterEncoding').onchange=loadMaster;byId('reloadMaster').onclick=loadMaster;
-byId('outputDate').value=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-byId('outputDate').onchange=()=>{if(outputUrl)URL.revokeObjectURL(outputUrl);outputUrl=null;byId('acqDownload').hidden=true;};
 byId('partRows').onchange=()=>{if(outputUrl)URL.revokeObjectURL(outputUrl);outputUrl=null;byId('acqDownload').hidden=true;};
 byId('cancelWork').onclick=()=>{stopWorker('ยกเลิกแล้ว กดอ่านไฟล์ใหม่เพื่อเริ่มอีกครั้ง');invalidate();notify('ยกเลิกแล้ว — ข้อมูลต้นฉบับยังอยู่ กดอ่านไฟล์ใหม่เพื่อเริ่มอีกครั้ง');};
 byId('cancelBottom').onclick=()=>byId('cancelWork').onclick();
