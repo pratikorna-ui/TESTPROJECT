@@ -33,14 +33,20 @@ async function open(entry,full=true){
 }
 function rowExists(source,r){return source.row(r)?.some(v=>v!==undefined&&v!==null&&v!==''&&(typeof v!=='object'||v.f||v.v!==''&&v.v!==undefined&&v.v!==null));}
 function schema(source,header,filename){
- const columns=[],seen=new Set();for(let c=0;c<=source.bounds.e.c;c++){const cell=source.cell(header-1,c),name=String(cell?.v??'').trim();if(!name)throw new Error(filename+': หัวตารางว่างที่ '+XLSX.utils.encode_col(c)+' แถว '+header);const id=key(name);if(seen.has(id))throw new Error(filename+': ชื่อหัวตารางซ้ำ '+name);seen.add(id);columns.push({id,name,c});}return columns;
+ const columns=[],seen=new Set(),blank=new Set(),named=new Map();
+ for(let c=0;c<=source.bounds.e.c;c++){const name=String(source.cell(header-1,c)?.v??'').trim();if(name){const id=key(name);if(seen.has(id))throw new Error(filename+': ชื่อหัวตารางซ้ำ '+name);seen.add(id);named.set(c,{id,name,c});}else blank.add(c);}
+ const populated=new Set();
+ if(blank.size)for(let r=header;r<=source.bounds.e.r;r++){const row=source.row(r);if(!row)continue;for(const index of Object.keys(row)){const c=Number(index);if(!blank.has(c))continue;const cell=source.cell(r,c);if(cell&&(cell.f||cell.v!==undefined&&cell.v!==null&&String(cell.v).trim()!=='')){populated.add(c);blank.delete(c);}}if(!blank.size)break;}
+ for(let c=0;c<=source.bounds.e.c;c++){if(named.has(c))columns.push(named.get(c));else if(populated.has(c)){let name='Column '+XLSX.utils.encode_col(c)+' (ไม่มีหัวตาราง)';while(seen.has(key(name)))name+=' (อัตโนมัติ)';seen.add(key(name));columns.push({id:'__unnamed_position_'+c,name,c,unnamed:true});}}
+ return columns;
 }
+
 async function analyze(entries){
  const union=new Map(),files=[],sample=[];let total=0;
  for(let i=0;i<entries.length;i++){
   const entry=entries[i];progress(`กำลังตรวจ ${i+1}/${entries.length}: ${entry.file.name}`,i,entries.length);const source=await open(entry),columns=schema(source,entry.header,entry.file.name);for(const col of columns)if(!union.has(col.id))union.set(col.id,{id:col.id,name:col.name});let count=0;
   for(let r=entry.header;r<=source.bounds.e.r;r++){if(rowExists(source,r)){count++;if(sample.length<20){const cells={};for(const col of columns){const cell=source.cell(r,col.c);if(cell)cells[col.id]=display(cell,source.date1904);}sample.push({file:entry.file.name,cells});}}if(r%20000===0){progress(`ตรวจ ${entry.file.name}: ${r.toLocaleString()} แถว`);await pause();}}
-  total+=count;if(total>1048575)throw new Error('รวมเกิน 1,048,575 แถวข้อมูล ซึ่งเกินขีดจำกัด Excel ไฟล์เดียว กรุณาแบ่งไฟล์นำเข้า');files.push({name:entry.file.name,sheet:source.name,count,columns:columns.map(c=>c.id)});
+  total+=count;if(total>1048575)throw new Error('รวมเกิน 1,048,575 แถวข้อมูล ซึ่งเกินขีดจำกัด Excel ไฟล์เดียว กรุณาแบ่งไฟล์นำเข้า');files.push({name:entry.file.name,sheet:source.name,count,columns:columns.map(c=>c.id),unnamed:columns.filter(c=>c.unnamed).map(c=>c.name)});
  }
  if(!total)throw new Error('ไม่มีข้อมูลหลังหัวตาราง');analysis={entries,columns:Array.from(union.values()),files,total};return {...analysis,entries:undefined,sample};
 }
