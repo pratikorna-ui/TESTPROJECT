@@ -1,5 +1,5 @@
 'use strict';
-importScripts('vendor/xlsx.full.min.js','vendor/fflate.min.js','vendor/sax.js','acq-xlsx-reader.js?v=xml-ns-2','reconcile-core.js?v=1');
+importScripts('vendor/xlsx.full.min.js','vendor/fflate.min.js','vendor/sax.js','acq-xlsx-reader.js?v=xml-ns-2','reconcile-core.js?v=ktc-types-1');
 const pause=()=>new Promise(r=>setTimeout(r,0));function progress(text,done,total){postMessage({type:'progress',text,done,total});}
 const C=ReconcileCore,METRICS=[16,17,18,28,26],NAMES=['Matched Transactions','Missing in Acquirer','Unexpected Acquirer','Variance Summary'];
 let reader,selection={},indices={},cached=null,headers=1;
@@ -16,16 +16,17 @@ async function run(file,head){
  const metrics=METRICS.map(c=>({column:XLSX.utils.encode_col(c),name:text(headers-1,c)||XLSX.utils.encode_col(c)})),groups=new Map(),bankDates=new Set(),matchedIds=new Set();let matchedCount=0,matchedSkipped=0;
  for(let r=headers;r<=reader.maxRow;r++){
   if(exists(r)){matchedCount++;const id=String(value(r,6)??'').trim();if(id)matchedIds.add(id);const bank=C.fileDate(value(r,0)),settle=C.settlement(value(r,14),XLSX.SSF.parse_date_code,reader.date1904);if(bank)bankDates.add(bank);
-   if(!bank||!settle){matchedSkipped++;issue(NAMES[0],r,!bank?'A':'O','อ่านวันที่ไม่ได้ แถวนี้ไม่อยู่ในยอดสรุป');}else{const profile=text(r,7).trim()||'(ว่าง)',key=JSON.stringify([bank,settle,profile]);let g=groups.get(key);if(!g){g={bank,settle,profile,count:0,sums:METRICS.map(C.accumulator)};groups.set(key,g);}g.count++;METRICS.forEach((c,i)=>{if(!C.add(g.sums[i],value(r,c)))issue(NAMES[0],r,XLSX.utils.encode_col(c),'ยอดไม่ใช่ตัวเลข ไม่นำค่านี้ไปรวม');});}}
+   if(!bank||!settle){matchedSkipped++;issue(NAMES[0],r,!bank?'A':'O','อ่านวันที่ไม่ได้ แถวนี้ไม่อยู่ในยอดสรุป');}else{const profile=text(r,7).trim()||'(ว่าง)',type=C.transactionType(value(r,3)),key=JSON.stringify([bank,settle,profile,type]);let g=groups.get(key);if(!g){g={bank,settle,profile,type,count:0,sums:METRICS.map(C.accumulator)};groups.set(key,g);}g.count++;METRICS.forEach((c,i)=>{if(!C.add(g.sums[i],value(r,c)))issue(NAMES[0],r,XLSX.utils.encode_col(c),'ยอดไม่ใช่ตัวเลข ไม่นำค่านี้ไปรวม');});}}
   if(r%10000===0){progress('สรุป Matched: '+r.toLocaleString()+' แถว',r,reader.maxRow);await pause();}
  }
- const matched={count:matchedCount,skipped:matchedSkipped,metrics,groups:Array.from(groups.values(),g=>({...g,sums:metricResults(g.sums)})).sort((a,b)=>a.bank.localeCompare(b.bank)||a.settle.localeCompare(b.settle)||a.profile.localeCompare(b.profile))};
+ const matched={count:matchedCount,skipped:matchedSkipped,metrics,groups:Array.from(groups.values(),g=>({...g,sums:metricResults(g.sums)})).sort((a,b)=>a.bank.localeCompare(b.bank)||a.settle.localeCompare(b.settle)||a.profile.localeCompare(b.profile)||a.type.localeCompare(b.type))};
  await open(selection[NAMES[1]]);if(reader.maxCol<14)throw new Error('Missing in Acquirer ต้องมีคอลัมน์ถึง O');const missingHeaders=Array.from({length:reader.maxCol+1},(_,c)=>text(headers-1,c));const unpaid=[];let scoped=0,received=0,missingCount=0,invalidDate=0,emptyId=0;
  for(let r=headers;r<=reader.maxRow;r++){
   if(exists(r)){missingCount++;if(text(r,3).trim().toUpperCase()==='SETTLED'){const d=C.settlement(value(r,14),XLSX.SSF.parse_date_code,reader.date1904);if(!d){invalidDate++;issue(NAMES[1],r,'O','อ่าน Settlement Date ไม่ได้');}else if(bankDates.has(d)){scoped++;const id=String(value(r,6)??'').trim();if(id&&matchedIds.has(id))received++;else{unpaid.push(r);if(!id){emptyId++;issue(NAMES[1],r,'G','G ว่าง จึงยืนยันการจับคู่ไม่ได้');}}}}}
   if(r%10000===0){progress('ตรวจ Missing: '+r.toLocaleString()+' แถว',r,reader.maxRow);await pause();}
  }
- indices.missing=unpaid;const missing={headers:missingHeaders,count:missingCount,scoped,received,pending:unpaid.length,emptyId,invalidDate,rows:unpaid.slice(0,50).map(r=>({row:r+1,values:row(r),note:text(r,6).trim()?'ไม่พบ G ใน Matched':'G ว่าง ต้องตรวจสอบ'}))};
+ const missingGroups=new Map();for(const r of unpaid){const profile=text(r,7).trim()||'(ว่าง)';missingGroups.set(profile,(missingGroups.get(profile)||0)+1);}
+ indices.missing=unpaid;const missing={summary:Array.from(missingGroups,([profile,count])=>({profile,count})).sort((a,b)=>a.profile.localeCompare(b.profile)),headers:missingHeaders,count:missingCount,scoped,received,pending:unpaid.length,emptyId,invalidDate,rows:unpaid.slice(0,50).map(r=>({row:r+1,values:row(r),note:text(r,6).trim()?'ไม่พบ G ใน Matched':'G ว่าง ต้องตรวจสอบ'}))};
  await open(selection[NAMES[2]]);indices.unexpected=[];const unexpectedHeaders=Array.from({length:reader.maxCol+1},(_,c)=>text(headers-1,c));for(let r=headers;r<=reader.maxRow;r++){if(exists(r))indices.unexpected.push(r);if(r%10000===0){progress('ตรวจ Unexpected: '+r.toLocaleString()+' แถว',r,reader.maxRow);await pause();}}const unexpected={headers:unexpectedHeaders,count:indices.unexpected.length,rows:indices.unexpected.slice(0,50).map(r=>({row:r+1,values:row(r)}))};
  await open(selection[NAMES[3]]);if(reader.maxCol<40)throw new Error('Variance Summary ต้องมีคอลัมน์ถึง AO');const varianceGroups=new Map();let varianceCount=0,varianceSkipped=0,varianceEligible=0;
  for(let r=headers;r<=reader.maxRow;r++){if(exists(r)){varianceCount++;if(text(r,0).trim().toLowerCase()==='bank line'){varianceEligible++;const bankLine='Bank line',date=C.fileDate(value(r,1));if(!date){varianceSkipped++;issue(NAMES[3],r,'B','อ่านวันที่จาก SourceFileName ไม่ได้');}else{const key=JSON.stringify([date,bankLine]);let g=varianceGroups.get(key);if(!g){g={date,bankLine,count:0,sum:C.accumulator()};varianceGroups.set(key,g);}g.count++;if(!C.add(g.sum,value(r,40)))issue(NAMES[3],r,'AO','ยอดไม่ใช่ตัวเลข ไม่นำค่านี้ไปรวม');}}}if(r%10000===0){progress('สรุป Variance: '+r.toLocaleString()+' แถว',r,reader.maxRow);await pause();}}
@@ -44,8 +45,8 @@ async function exportDiff(netColumn){
    const bank=C.fileDate(value(r,0)),settle=C.settlement(value(r,14),XLSX.SSF.parse_date_code,reader.date1904);
    if(!bank||!settle)skipped++;
    else if(bank!==settle){
-    const source=String(value(r,0)??''),profile=text(r,7).trim(),key=JSON.stringify([bank,settle,profile]);
-    let g=groups.get(key);if(!g){g={sources:new Set(),bank,settle,profile,count:0,sums:Array.from({length:6},C.accumulator)};groups.set(key,g);}
+    const source=String(value(r,0)??''),profile=text(r,7).trim(),type=C.transactionType(value(r,3)),key=JSON.stringify([bank,settle,profile,type]);
+    let g=groups.get(key);if(!g){g={sources:new Set(),bank,settle,profile,type,count:0,sums:Array.from({length:6},C.accumulator)};groups.set(key,g);}
     g.sources.add(source);g.count++;
     METRICS.forEach((c,i)=>C.add(g.sums[i],value(r,c)));
     if(formula)[17,18,28,26].forEach(c=>C.add(g.sums[5],value(r,c)));else C.add(g.sums[5],value(r,netIndex));
@@ -53,13 +54,25 @@ async function exportDiff(netColumn){
   }
   if(r%10000===0){progress('เตรียม Diff found: '+r.toLocaleString()+' แถว',r,reader.maxRow);await pause();}
  }
- const data=Array.from(groups.values()).sort((a,b)=>a.bank.localeCompare(b.bank)||a.settle.localeCompare(b.settle)||a.profile.localeCompare(b.profile));
+ const data=Array.from(groups.values()).sort((a,b)=>a.bank.localeCompare(b.bank)||a.settle.localeCompare(b.settle)||a.profile.localeCompare(b.profile)||a.type.localeCompare(b.type));
  if(data.some(g=>g.sums.some(s=>s.invalid)))throw new Error('พบยอดที่ไม่ใช่ตัวเลขในรายการ Diff ไม่ส่งออกยอดบางส่วน กรุณาตรวจไฟล์ต้นฉบับ');
  const money=s=>{const exact=C.amount(s),n=Number(exact),roundtrip=C.accumulator();C.add(roundtrip,n);if(!Number.isFinite(n)||C.amount(roundtrip)!==exact)return {t:'s',v:exact};return {t:'n',v:n,z:'#,##0.'+'0'.repeat(Math.max(2,s.scale))};};
- const sourceRows=[['Bank settlement date','2C2P settlement date','Bank Profile','Sourcefile']];
- const sourceLabel=g=>{const sources=Array.from(g.sources).sort(),label=sources.join('\n');sources.forEach(source=>sourceRows.push([C.showDate(g.bank),C.showDate(g.settle),g.profile,source]));return label.length<=32767?label:sources.length+' sourcefiles (ดูชีต Sourcefiles)';};
- const rows=[['Sourcefile','Bank settlement date','2C2P settlement date','Bank Profile','จำนวนรายการ','Tran amount','Acq amount','Acq MDR fee','Acq interest fee','Acq VAT','Net amount','Remark'],...data.map(g=>[sourceLabel(g),C.showDate(g.bank),C.showDate(g.settle),g.profile,g.count,...g.sums.map(money),''])];
+ const sourceRows=[['Bank settlement date','2C2P settlement date','Bank Profile','Sourcefile','ประเภท D']];
+ const sourceLabel=g=>{const sources=Array.from(g.sources).sort(),label=sources.join('\n');sources.forEach(source=>sourceRows.push([C.showDate(g.bank),C.showDate(g.settle),g.profile,source,g.type]));return label.length<=32767?label:sources.length+' sourcefiles (ดูชีต Sourcefiles)';};
+ const rows=[['Sourcefile','Bank settlement date','2C2P settlement date','Bank Profile','จำนวนรายการ','Tran amount','Acq amount','Acq MDR fee','Acq interest fee','Acq VAT','Net amount','ประเภท D','Remark'],...data.map(g=>[sourceLabel(g),C.showDate(g.bank),C.showDate(g.settle),g.profile,g.count,...g.sums.map(money),g.type,''])];
  const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(rows);sheet['!cols']=[{wch:65},{wch:23},{wch:23},{wch:40},{wch:16},...Array.from({length:6},()=>({wch:22})),{wch:30}];sheet['!autofilter']={ref:sheet['!ref']};XLSX.utils.book_append_sheet(book,sheet,'Diff found');XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet(sourceRows),'Sourcefiles');
  return {bytes:XLSX.write(book,{type:'array',bookType:'xlsx'}),groups:data.length,count:data.reduce((n,g)=>n+g.count,0),skipped};
 }
-onmessage=async({data})=>{try{let result;if(data.action==='run')result=await run(data.file,data.header);else if(data.action==='exportDiff')result=await exportDiff(data.netColumn);else{const kind=data.kind;if(!['missing','unexpected'].includes(kind)||!indices[kind])throw new Error('กรุณาสรุปไฟล์ก่อน');await open(selection[kind==='missing'?NAMES[1]:NAMES[2]]);const start=data.page*50;result={rows:indices[kind].slice(start,start+50).map(r=>({row:r+1,values:row(r),note:kind==='missing'?(text(r,6).trim()?'ไม่พบ G ใน Matched':'G ว่าง ต้องตรวจสอบ'):undefined}))};}postMessage({type:'done',id:data.id,result});}catch(e){postMessage({type:'error',id:data.id,error:e.message});}};
+async function exportRows(kind){
+ if(!['missing','unexpected'].includes(kind)||!indices[kind])throw new Error('กรุณาสรุปไฟล์ก่อน');
+ await open(selection[kind==='missing'?NAMES[1]:NAMES[2]]);
+ const book=XLSX.utils.book_new(),data=[],summary=new Map();
+ const copy=r=>Array.from({length:reader.maxCol+1},(_,c)=>{const cell=reader.cell(r,c);if(!cell)return undefined;if(cell.f&&cell.v===undefined)throw new Error('พบสูตรที่ไม่มีค่าผลลัพธ์ กรุณาบันทึกไฟล์ผ่าน Excel ก่อน');return {t:cell.t,v:cell.v,...(cell.z?{z:cell.z}:{})};});
+ for(let r=0;r<headers;r++)data.push(copy(r));
+ for(let i=0;i<indices[kind].length;i++){const r=indices[kind][i];data.push(copy(r));if(kind==='missing'){const profile=text(r,7).trim()||'(ว่าง)';summary.set(profile,(summary.get(profile)||0)+1);}if(i%5000===0){progress('เตรียม Export '+kind+': '+i.toLocaleString()+' รายการ',i,indices[kind].length);await pause();}}
+ const sheet=XLSX.utils.aoa_to_sheet(data);if(reader.date1904)book.Workbook={WBProps:{date1904:true}};
+ if(kind==='missing')XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['Bank Profile (H)','จำนวนรายการ'],...Array.from(summary).sort((a,b)=>a[0].localeCompare(b[0])),['Total',indices[kind].length]]),'Summary');
+ XLSX.utils.book_append_sheet(book,sheet,kind==='missing'?'Missing in Acquirer':'Unexpected Acquirer');
+ return {bytes:XLSX.write(book,{type:'array',bookType:'xlsx',compression:true}),count:indices[kind].length};
+}
+onmessage=async({data})=>{try{let result;if(data.action==='run')result=await run(data.file,data.header);else if(data.action==='exportRows')result=await exportRows(data.kind);else if(data.action==='exportDiff')result=await exportDiff(data.netColumn);else{const kind=data.kind;if(!['missing','unexpected'].includes(kind)||!indices[kind])throw new Error('กรุณาสรุปไฟล์ก่อน');await open(selection[kind==='missing'?NAMES[1]:NAMES[2]]);const start=data.page*50;result={rows:indices[kind].slice(start,start+50).map(r=>({row:r+1,values:row(r),note:kind==='missing'?(text(r,6).trim()?'ไม่พบ G ใน Matched':'G ว่าง ต้องตรวจสอบ'):undefined}))};}postMessage({type:'done',id:data.id,result});}catch(e){postMessage({type:'error',id:data.id,error:e.message});}};
