@@ -3,7 +3,7 @@ importScripts('vendor/papaparse.min.js','vendor/xlsx.full.min.js','vendor/fflate
 const pause=()=>new Promise(r=>setTimeout(r,0));
 function progress(text,done,total){postMessage({type:'progress',text,done,total});}
 const key=s=>String(s).trim().normalize('NFC').toLowerCase();
-let analysis=null;
+let analysis=null,previewFormats=new Set();
 async function openCSV(entry,full){
  const file=entry.file,encoding=entry.encoding||'auto',previewOnly=!full,headerEnd=entry.header;let csvRows,bounds,detectedEncoding;
  const sample=new Uint8Array(await file.slice(0,65536).arrayBuffer());let enc=encoding;
@@ -55,9 +55,10 @@ async function analyzeRaw(entries){
   for(let r=0;r<=bounds.lastRow&&sample.length<20;r++){const cells={};for(let c=0;c<=bounds.lastCol;c++){const cell=source.cell(r,c);if(cell)cells['position:'+c]=display(cell,source.date1904);}sample.push({file:entry.file.name,cells});}await pause();
  }
  if(!total)throw new Error('ไม่มีข้อมูลในชีตที่เลือก');
- analysis={mode:'raw',entries,columns:Array.from({length:maxCol+1},(_,c)=>({id:'position:'+c,name:XLSX.utils.encode_col(c),c})),files,total};return {...analysis,entries:undefined,sample};
+ analysis={mode:'raw',entries,columns:Array.from({length:maxCol+1},(_,c)=>({id:'position:'+c,name:XLSX.utils.encode_col(c),c})),files,total};return {...analysis,entries:undefined,sample,previewFormats:Array.from(previewFormats)};
 }
 async function analyze(entries,mode='headers'){
+ previewFormats=new Set();
  if(mode==='raw')return analyzeRaw(entries);
  const union=new Map(),files=[],sample=[];let total=0;
  for(let i=0;i<entries.length;i++){
@@ -65,9 +66,9 @@ async function analyze(entries,mode='headers'){
   for(let r=entry.header;r<=source.bounds.e.r;r++){if(rowExists(source,r)){count++;if(sample.length<20){const cells={};for(const col of columns){const cell=source.cell(r,col.c);if(cell)cells[col.id]=display(cell,source.date1904);}sample.push({file:entry.file.name,cells});}}if(r%20000===0){progress(`ตรวจ ${entry.file.name}: ${r.toLocaleString()} แถว`);await pause();}}
   total+=count;if(total>1048575)throw new Error('รวมเกิน 1,048,575 แถวข้อมูล ซึ่งเกินขีดจำกัด Excel ไฟล์เดียว กรุณาแบ่งไฟล์นำเข้า');files.push({name:entry.file.name,sheet:source.name,count,columns:columns.map(c=>c.id),unnamed:columns.filter(c=>c.unnamed).map(c=>c.name)});
  }
- if(!total)throw new Error('ไม่มีข้อมูลหลังหัวตาราง');analysis={mode:'headers',entries,columns:Array.from(union.values()),files,total};return {...analysis,entries:undefined,sample};
+ if(!total)throw new Error('ไม่มีข้อมูลหลังหัวตาราง');analysis={mode:'headers',entries,columns:Array.from(union.values()),files,total};return {...analysis,entries:undefined,sample,previewFormats:Array.from(previewFormats)};
 }
-function display(cell,date1904){if(cell.t==='n'&&cell.z)return XLSX.SSF.format(cell.z,cell.v,{date1904});return String(cell.v??'');}
+function display(cell,date1904){if(cell.t==='n'&&cell.z){try{return XLSX.SSF.format(cell.z,cell.v,{date1904});}catch{if(previewFormats.size<20)previewFormats.add(String(cell.z));}}return String(cell.v??'');}
 function escapeXml(v){return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function excelText(v){return escapeXml(String(v).replace(/_x[\da-f]{4}_/gi,s=>'_x005F_'+s.slice(1)).replace(/[\x00-\x08\x0B-\x0F\x10-\x1F\uFFFE\uFFFF]/g,c=>'_x'+c.charCodeAt(0).toString(16).padStart(4,'0').toUpperCase()+'_'));}
 class StreamingWorkbook{
