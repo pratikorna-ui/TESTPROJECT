@@ -49,9 +49,9 @@ function contentBounds(source){
 async function analyzeRaw(entries){
  const files=[],sample=[];let total=0,maxCol=-1;
  for(let i=0;i<entries.length;i++){
-  const entry=entries[i];progress(`กำลังตรวจทุกแถว ${i+1}/${entries.length}: ${entry.file.name}`,i,entries.length);const source=await open(entry),bounds=contentBounds(source);const count=bounds.lastRow+1;total+=count;maxCol=Math.max(maxCol,bounds.lastCol);
+  const entry=entries[i];progress(`กำลังตรวจทุกแถว ${i+1}/${entries.length}: ${entry.file.name} [${entry.sheet||""}]`,i,entries.length);const source=await open(entry),bounds=contentBounds(source);const count=bounds.lastRow+1;total+=count;maxCol=Math.max(maxCol,bounds.lastCol);
   if(total>1048576)throw new Error('รวมเกิน 1,048,576 แถว ซึ่งเกินขีดจำกัด Excel กรุณาแบ่งไฟล์นำเข้า');
-  const columns=Array.from({length:bounds.lastCol+1},(_,c)=>'position:'+c);files.push({name:entry.file.name,sheet:source.name,count,columns,lastRow:bounds.lastRow,unnamed:[]});
+  const columns=Array.from({length:bounds.lastCol+1},(_,c)=>'position:'+c);files.push({sourceIndex:entry.sourceIndex,name:entry.file.name,sheet:source.name,count,columns,lastRow:bounds.lastRow,unnamed:[]});
   for(let r=0;r<=bounds.lastRow&&sample.length<20;r++){const cells={};for(let c=0;c<=bounds.lastCol;c++){const cell=source.cell(r,c);if(cell)cells['position:'+c]=display(cell,source.date1904);}sample.push({file:entry.file.name,cells});}await pause();
  }
  if(!total)throw new Error('ไม่มีข้อมูลในชีตที่เลือก');
@@ -62,9 +62,9 @@ async function analyze(entries,mode='headers'){
  if(mode==='raw')return analyzeRaw(entries);
  const union=new Map(),files=[],sample=[];let total=0;
  for(let i=0;i<entries.length;i++){
-  const entry=entries[i];progress(`กำลังตรวจ ${i+1}/${entries.length}: ${entry.file.name}`,i,entries.length);const source=await open(entry),columns=schema(source,entry.header,entry.file.name);for(const col of columns)if(!union.has(col.id))union.set(col.id,{id:col.id,name:col.name});let count=0;
+  const entry=entries[i];progress(`กำลังตรวจ ${i+1}/${entries.length}: ${entry.file.name} [${entry.sheet||""}]`,i,entries.length);const source=await open(entry),columns=schema(source,entry.header,entry.file.name);for(const col of columns)if(!union.has(col.id))union.set(col.id,{id:col.id,name:col.name});let count=0;
   for(let r=entry.header;r<=source.bounds.e.r;r++){if(rowExists(source,r)){count++;if(sample.length<20){const cells={};for(const col of columns){const cell=source.cell(r,col.c);if(cell)cells[col.id]=display(cell,source.date1904);}sample.push({file:entry.file.name,cells});}}if(r%20000===0){progress(`ตรวจ ${entry.file.name}: ${r.toLocaleString()} แถว`);await pause();}}
-  total+=count;if(total>1048575)throw new Error('รวมเกิน 1,048,575 แถวข้อมูล ซึ่งเกินขีดจำกัด Excel ไฟล์เดียว กรุณาแบ่งไฟล์นำเข้า');files.push({name:entry.file.name,sheet:source.name,count,columns:columns.map(c=>c.id),unnamed:columns.filter(c=>c.unnamed).map(c=>c.name)});
+  total+=count;if(total>1048575)throw new Error('รวมเกิน 1,048,575 แถวข้อมูล ซึ่งเกินขีดจำกัด Excel ไฟล์เดียว กรุณาแบ่งไฟล์นำเข้า');files.push({sourceIndex:entry.sourceIndex,name:entry.file.name,sheet:source.name,count,columns:columns.map(c=>c.id),unnamed:columns.filter(c=>c.unnamed).map(c=>c.name)});
  }
  if(!total)throw new Error('ไม่มีข้อมูลหลังหัวตาราง');analysis={mode:'headers',entries,columns:Array.from(union.values()),files,total};return {...analysis,entries:undefined,sample,previewFormats:Array.from(previewFormats)};
 }
@@ -81,7 +81,7 @@ class StreamingWorkbook{
 }
 async function merge(selected,includeSource){
  if(!analysis)throw new Error('กรุณาตรวจไฟล์ใหม่');const raw=analysis.mode==='raw',columns=raw?analysis.columns:analysis.columns.filter(c=>selected.includes(c.id));if(!columns.length)throw new Error('เลือกอย่างน้อย 1 คอลัมน์');let sourceName='Source File (ต้นทาง)';while(columns.some(c=>key(c.name)===key(sourceName)))sourceName+=' (เพิ่ม)';const headers=columns.map(c=>c.name);if(includeSource)headers.push(sourceName);if(headers.length>16384)throw new Error('จำนวนคอลัมน์เกินขีดจำกัด Excel');const output=new StreamingWorkbook(headers,analysis.total,!raw);let count=0;
- for(const [fileIndex,entry]of analysis.entries.entries()){progress('กำลังรวม '+entry.file.name,count,analysis.total);const source=await open(entry),map=new Map((raw?columns:schema(source,entry.header,entry.file.name)).map(c=>[c.id,c.c]));for(let r=raw?0:entry.header;r<=(raw?analysis.files[fileIndex].lastRow:source.bounds.e.r);r++){
+ for(const [fileIndex,entry]of analysis.entries.entries()){progress('กำลังรวม '+entry.file.name+' ['+(entry.sheet||'')+']',count,analysis.total);const source=await open(entry),map=new Map((raw?columns:schema(source,entry.header,entry.file.name)).map(c=>[c.id,c.c]));for(let r=raw?0:entry.header;r<=(raw?analysis.files[fileIndex].lastRow:source.bounds.e.r);r++){
   if(raw||rowExists(source,r)){const row=columns.map(col=>{if(!map.has(col.id))return;const cell=source.cell(r,map.get(col.id));if(!cell)return;const copy={...cell};if(source.date1904&&cell.t==='n'&&cell.z&&XLSX.SSF.is_date(cell.z))copy.v+=1462;if(cell.t==='d'){copy.t='n';copy.v=(new Date(cell.v).getTime()-Date.UTC(1899,11,30))/86400000;copy.z=cell.z||'yyyy-mm-dd';}return copy;});if(includeSource)row.push({t:'s',v:entry.file.name});output.addRow(row);count++;}
   if(r%5000===0){progress(`กำลังรวม ${count.toLocaleString()} / ${analysis.total.toLocaleString()} แถว`,count,analysis.total);await pause();}
  }}if(count!==analysis.total)throw new Error('จำนวนแถวเปลี่ยน กรุณาตรวจไฟล์ใหม่');progress('กำลังบันทึก Excel…');return {blob:output.finish(),count,sourceName:includeSource?sourceName:null};
