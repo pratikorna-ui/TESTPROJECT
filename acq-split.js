@@ -25,7 +25,7 @@ function invalidate(){results=null;byId('result').replaceChildren();byId('export
 function lock(value){pending=value;document.querySelectorAll('input,select,textarea,button').forEach(e=>e.disabled=value);byId('cancelWork').disabled=!value;byId('cancelBottom').disabled=!value;byId('masterSheet').disabled=value||!loaded;byId('check').disabled=value||!loaded;byId('exportAcq').disabled=value||!results;byId('workProgress').hidden=!value;if(value)byId('workProgress').removeAttribute('value');}
 function stopWorker(reason){if(worker)worker.terminate();worker=null;loaded=false;const request=current;current=null;if(request)request.reject(new Error(reason));lock(false);}
 function runWorker(action,extra={}){
- if(!worker){worker=new Worker('acq-worker.js?v=source-date-1');const instance=worker;worker.onmessage=({data})=>{if(worker!==instance)return;
+ if(!worker){worker=new Worker('acq-worker.js?v=250mb-1');const instance=worker;worker.onmessage=({data})=>{if(worker!==instance)return;
   if(data.type==='progress'){notify(data.text);if(data.total){byId('workProgress').max=data.total;byId('workProgress').value=data.done;}else byId('workProgress').removeAttribute('value');return;}
   if(!current||data.id!==current.id)return;const request=current;current=null;if(data.type==='error')request.reject(new Error(data.error));else request.resolve(data.result);
  };worker.onerror=()=>{stopWorker('เครื่องมือประมวลผลหยุดทำงาน อาจมีหน่วยความจำไม่พอ กดอ่านไฟล์ใหม่เพื่อลองอีกครั้ง');notify('เครื่องมือประมวลผลหยุดทำงาน กดอ่านไฟล์ใหม่เพื่อลองอีกครั้ง',true);};}
@@ -62,7 +62,7 @@ async function loadMaster(){
  if(!source){lock(false);return;}
  lock(true);notify('กำลังเปิดตัวอย่าง MASTER…');
  try{
-  if(!/\.(xlsx|xls|csv)$/i.test(source.name))throw new Error('รองรับ .xlsx / .xls / .csv');if(source.size>100*1024*1024)throw new Error('ไฟล์ขนาด '+(source.size/1024/1024).toFixed(1)+' MB เกินขีดจำกัด 100 MB');
+  if(!/\.(xlsx|xls|csv)$/i.test(source.name))throw new Error('รองรับ .xlsx / .xls / .csv');if(source.size>250*1024*1024)throw new Error('ไฟล์ขนาด '+(source.size/1024/1024).toFixed(1)+' MB เกินขีดจำกัด 250 MB');
   const answer=await runWorker('load',{file:source,encoding:byId('masterEncoding').value,headers:headerCount(),sheet:byId('masterSheet').value});
   byId('masterSheet').replaceChildren();answer.names.forEach(name=>byId('masterSheet').add(new Option(name,name)));byId('masterSheet').value=answer.sheet;range=answer.range;loaded=true;
   byId('masterPreview').replaceChildren(tablePreview(answer.preview));byId('masterPreview').closest('details').open=true;
@@ -84,7 +84,7 @@ async function exportResults(){
  try{const blob=await runWorker('export',{partRows:Number(byId('partRows').value)});outputUrl=URL.createObjectURL(blob);const link=byId('acqDownload');link.href=outputUrl;link.download=source.name.replace(/\.[^.]+$/,'').replace(/[\\/:*?"<>|]/g,'_')+'_ACQ.zip';link.hidden=false;link.click();notify(results.unique?'เสร็จแล้ว! ZIP มีเฉพาะรายการตรง ACQ พร้อม Summary (ไม่มีไฟล์ Unmatched)':'ไม่มีรายการตรงกฎ ZIP มีเฉพาะ Summary สำหรับตรวจจำนวน');}
  catch(e){notify('ยังไม่สร้าง ZIP: '+e.message,true);}finally{lock(false);}
 }
-byId('master').onchange=()=>{source=byId('master').files[0]||null;byId('masterSheet').replaceChildren();loadMaster();};byId('masterSheet').onchange=loadMaster;byId('headerEnd').onchange=loadMaster;byId('masterEncoding').onchange=loadMaster;byId('reloadMaster').onclick=loadMaster;
+byId('master').onchange=()=>{source=byId('master').files[0]||null;if(source?.size>100*1024*1024)byId('partRows').value='10000';byId('masterSheet').replaceChildren();loadMaster();};byId('masterSheet').onchange=loadMaster;byId('headerEnd').onchange=loadMaster;byId('masterEncoding').onchange=loadMaster;byId('reloadMaster').onclick=loadMaster;
 byId('partRows').onchange=()=>{if(outputUrl)URL.revokeObjectURL(outputUrl);outputUrl=null;byId('acqDownload').hidden=true;};
 byId('cancelWork').onclick=()=>{stopWorker('ยกเลิกแล้ว กดอ่านไฟล์ใหม่เพื่อเริ่มอีกครั้ง');invalidate();notify('ยกเลิกแล้ว — ข้อมูลต้นฉบับยังอยู่ กดอ่านไฟล์ใหม่เพื่อเริ่มอีกครั้ง');};
 byId('cancelBottom').onclick=()=>byId('cancelWork').onclick();

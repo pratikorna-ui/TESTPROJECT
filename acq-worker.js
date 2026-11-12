@@ -93,7 +93,7 @@ async function exportZip(partRows){
 onmessage=async({data})=>{try{
  let result;
  if(data.action==='load'){
-  file=data.file;encoding=data.encoding;headerEnd=data.headers;selectedName=data.sheet;checked=null;compact=null;detectedEncoding=null;
+  file=data.file;if(file.size>250*1024*1024)throw new Error('ไฟล์เกินขีดจำกัด 250 MB');encoding=data.encoding;headerEnd=data.headers;selectedName=data.sheet;checked=null;compact=null;detectedEncoding=null;
   if(/\.csv$/i.test(file.name)){selectedName='MASTER';result={names:['MASTER']};}else if(/\.xlsx$/i.test(file.name)){compact=new CompactXlsx(file);await compact.metadata();const names=compact.names;selectedName=names.includes(data.sheet)?data.sheet:names[0];result={names};}else{
    progress('กำลังตรวจแผ่นงาน…');const names=XLSX.read(await file.arrayBuffer(),{type:'array',bookSheets:true}).SheetNames;selectedName=data.sheet&&names.includes(data.sheet)?data.sheet:names[0];result={names};
   }
